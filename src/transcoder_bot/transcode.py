@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from transcoder_bot import commands, loudnorm
-from transcoder_bot.config import Config, ConfigError, OutputConfig
+from transcoder_bot.config import Config, ConfigError, OutputConfig, bitrate_kbps
 from transcoder_bot.formatting import human_duration, human_size
 from transcoder_bot.loudnorm import LoudnessStats, LoudnormError
 from transcoder_bot.media import MediaInfo, ProbeError, probe
@@ -22,7 +22,7 @@ from transcoder_bot.runner import ProgressCallback, RunFfmpeg, run_ffmpeg
 
 log = logging.getLogger(__name__)
 
-# Generous upper bound for a 1080p H.264/HEVC encode plus AAC audio; used to check free space.
+# Generous upper bound for a constant-quality (CRF) 1080p encode; used to check free space.
 ESTIMATED_BITS_PER_SECOND = 25_000_000
 
 
@@ -117,7 +117,12 @@ class Transcoder:
         lines = [
             f"{source} → {dest}" + ("  (already exists)" if dest.exists() else ""),
             f"  video: {info.width}x{info.height} {info.video_codec}, "
-            f"{human_duration(info.duration)} → {out_w}x{out_h} {cfg.video.encoder}",
+            f"{human_duration(info.duration)} → {out_w}x{out_h} {cfg.video.encoder}, "
+            + (
+                f"{bitrate_kbps(cfg.video.bitrate) / 1000:g} Mbit/s"
+                if cfg.video.bitrate
+                else f"CRF {cfg.video.crf}"
+            ),
             f"  video filters: {commands.video_filter(info, cfg.video)}",
         ]
         audio_index = self._audio_index(source, info)
@@ -175,7 +180,7 @@ class Transcoder:
             if cfg.audio.normalize:
                 before = self._measure(source, info, audio_index, pan, on_progress)
 
-        needed = int(info.duration * ESTIMATED_BITS_PER_SECOND / 8)
+        needed = int(info.duration * _estimated_bits_per_second(cfg) / 8)
         with tempfile.TemporaryDirectory(prefix="transcoder-bot-", dir=cfg.temp_dir) as tmp:
             staged = Path(tmp) / dest.name
             ensure_free_space(Path(tmp), needed, what="the temp folder")
@@ -259,6 +264,15 @@ class Transcoder:
             )
         if expect_audio and not out.audio_streams:
             raise TranscodeError("Encoded video has no audio")
+
+
+def _estimated_bits_per_second(config: Config) -> float:
+    """A safe upper bound for the output's data rate, for checking free space."""
+    if not config.video.bitrate:
+        return ESTIMATED_BITS_PER_SECOND
+    video = bitrate_kbps(config.video.bitrate) * 1000
+    audio = bitrate_kbps(config.audio.bitrate) * 1000
+    return video * 1.2 + audio  # the encoder's average can run a little over its target
 
 
 def _parse_optional_stats(stderr: str) -> LoudnessStats | None:

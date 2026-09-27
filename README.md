@@ -38,7 +38,7 @@ ffmpeg -i Service.mov -map 0:a:0 \
 # Pass 2: rotate, scale, normalize and encode, with the numbers from pass 1
 ffmpeg -i Service.mov -map 0:v:0 -map 0:a:0 \
   -vf 'scale=1920:1080:flags=lanczos,setsar=1,transpose=dir=cclock,format=yuv420p' \
-  -c:v libx264 -preset medium -crf 20 -profile:v high \
+  -c:v libx264 -preset medium -b:v 25000k -maxrate 37500k -bufsize 50000k -profile:v high \
   -af 'pan=stereo|c0=c0|c1=c1,loudnorm=I=-16:TP=-1.5:LRA=11:measured_I=-27.61:measured_TP=-4.47:measured_LRA=8.06:measured_thresh=-38.20:offset=0.58:linear=true,aresample=48000' \
   -c:a aac -b:a 192k -map_metadata 0 -movflags +faststart Service_1080p.mp4
 ```
@@ -49,7 +49,7 @@ ffmpeg -i Service.mov -map 0:v:0 -map 0:a:0 \
 | Scale | Lanczos, before rotating | 3840×2160 → 1920×1080 is a clean 2:1. Scaling first means rotating a 1080p frame rather than a 4K one, which is 4× less work. It never upscales, so a 1080p source is only rotated. |
 | Loudness | Two-pass `loudnorm`: −16 LUFS, −1.5 dBTP peak, 11 LU range | −16 LUFS is the usual target for phones, podcasts and social video. YouTube plays back at about −14, so use `target_lufs = -14` if that's your main outlet. Two passes let ffmpeg apply one clean gain change instead of riding the level. |
 | Audio channels | Channels 1–2 as left/right | HyperDecks record 2–16 embedded channels, and the program mix is normally on 1 and 2. Change `audio.channels` if yours differs, e.g. `[1]` for a single mic on channel 1. |
-| Video | H.264 High, CRF 20, preset `medium` | Plays everywhere. Files are typically a few GB per 45 minutes, depending on the picture. |
+| Video | H.264 High at about 25 Mbit/s, preset `medium` | A high-quality master for editing that still plays everywhere. At this bitrate H.264 is visually lossless for 1080p, so HEVC wouldn't look any better. 45 minutes comes to about 8.5 GB. |
 | Container | MP4 with `faststart`, AAC 192 kb/s | Ready to upload or stream: playback can start before the whole file has downloaded. |
 
 loudnorm only applies a single gain change when it can do so cleanly. If a recording's loudness range is wider than 11 LU, or a straight gain would push peaks past the limit, it quietly switches to gentle dynamic normalization. Raise `audio.lra` (maximum 50) if you'd rather keep more of the original dynamics.
@@ -68,7 +68,7 @@ It also protects the originals and the NAS:
 
 Each transcode reads the whole recording from the NAS. For a 70 GiB file, that alone takes about 11 minutes over gigabit Ethernet, or 1–2 minutes over 10 GbE if the NAS keeps up. The encode usually takes longer than the read. If it's too slow for you:
 
-- `encoder = "h264_videotoolbox"` encodes on Apple's media engine: several times faster, with somewhat larger files at the same quality.
+- `encoder = "h264_videotoolbox"` encodes on Apple's media engine: several times faster, and at 25 Mbit/s it looks nearly as good as libx264.
 - `hwaccel = "videotoolbox"` also decodes ProRes on the media engine, which leaves the CPU free for the encoder.
 
 ## Setup on the Mac Studio
@@ -233,7 +233,7 @@ After each transcode, transcoder-bot:
 3. **Waits for Descript to finish importing it**, for up to `wait_minutes` (60 by default).
 4. **Shares the link.** With Slack set up, the link goes in the poll's thread and "Open in Descript" is added to the poll message. Otherwise it's written to the log.
 
-**File size.** Descript's import docs don't list a size limit for API uploads. The 1080p files are typically a few GB, well under what Descript accepts in the browser. If your plan ever rejects big files, set `max_upload_gb`. Videos bigger than that then get a smaller H.264 copy made just for Descript, at the highest bitrate that fits; the file on the NAS stays full quality.
+**File size.** The upload is the full `_1080p.mp4`, about 8.5 GB for 45 minutes at 25 Mbit/s. Descript's import docs don't list a size limit for API uploads. If Descript does reject a file that big, upload it by hand in the Descript app.
 
 **If an upload fails**, the transcode is kept. The error and a retry command go to the Slack thread and the log:
 
@@ -270,7 +270,7 @@ Every option is documented in [`config.example.toml`](src/transcoder_bot/config.
 |---|---|
 | Rotate the other way | `[video] rotate = "cw"` |
 | Encode faster | `[video] encoder = "h264_videotoolbox"` and `hwaccel = "videotoolbox"` |
-| Make smaller files | `[video] crf = 23` |
+| Make smaller files | `[video] bitrate = "12M"`, or `bitrate = ""` for constant quality (`crf`, a few GB per 45 minutes) |
 | Match YouTube's loudness | `[audio] target_lufs = -14` |
 | Use a single mic on channel 1 | `[audio] channels = [1]` |
 | Use program audio on channels 3–4 | `[audio] channels = [3, 4]` |
@@ -293,7 +293,7 @@ Every option is documented in [`config.example.toml`](src/transcoder_bot/config.
 - **Slack says "This app is not responding" when you click.** The job isn't running. The poll may have timed out, or the Mac slept or restarted. The next scheduled run posts a fresh poll.
 - **Descript "rejected the API key".** Create a new token under **Settings → API tokens** and update `descript.api_key`. Each token belongs to one Drive.
 - **Descript returns HTTP 402 ("payment required").** The Drive may have run out of credits for your plan; check its usage in Descript.
-- **"too long to fit under descript.max_upload_gb".** This only happens if you've set `max_upload_gb`: the recording would look too rough squeezed to that size. Raise the limit, or import the `_1080p.mp4` with the Descript app.
+- **Descript rejects a big upload.** Upload the `_1080p.mp4` by hand in the Descript app.
 - **`encoder libx264 … not available`.** Homebrew has said it may drop x264 from its `ffmpeg` formula in 2027. Either:
   - set `encoder = "h264_videotoolbox"`, or
   - `brew install ffmpeg-full`, then point `ffmpeg` and `ffprobe` at `/opt/homebrew/opt/ffmpeg-full/bin/`.

@@ -47,6 +47,18 @@ class ConfigError(ValueError):
     """The configuration is missing or invalid."""
 
 
+_BITRATE = re.compile(r"(\d+(?:\.\d+)?)\s*([kKmM])")
+
+
+def bitrate_kbps(text: str) -> int:
+    """``"25M"`` → ``25000``; ``"8000k"`` → ``8000``."""
+    match = _BITRATE.fullmatch(text.strip())
+    if match is None:
+        raise ConfigError(f"Not a bitrate: {text!r} (expected something like 25M or 8000k)")
+    value, unit = float(match.group(1)), match.group(2).lower()
+    return round(value * (1000 if unit == "m" else 1))
+
+
 def _fail(message: str) -> NoReturn:
     raise ConfigError(message)
 
@@ -79,6 +91,7 @@ class VideoConfig:
     rotate: str = "ccw"
     short_side: int = 1080
     encoder: str = "libx264"
+    bitrate: str = "25M"
     crf: int = 20
     preset: str = "medium"
     vt_quality: int = 65
@@ -92,6 +105,10 @@ class VideoConfig:
             "video.short_side must be an even number of pixels (e.g. 1080)",
         )
         _check(self.encoder in ENCODERS, f"video.encoder must be one of {ENCODERS}")
+        _check(
+            self.bitrate == "" or _BITRATE.fullmatch(self.bitrate) is not None,
+            'video.bitrate must look like "25M" or "8000k" (or "" to use crf instead)',
+        )
         _check(0 <= self.crf <= 51, "video.crf must be between 0 and 51")
         _check(self.preset in X264_PRESETS, f"video.preset must be one of {X264_PRESETS}")
         _check(1 <= self.vt_quality <= 100, "video.vt_quality must be between 1 and 100")
@@ -206,7 +223,6 @@ class DescriptConfig:
     folder: str = ""
     team_access: str = ""
     language: str = ""
-    max_upload_gb: float = 0.0
     wait_minutes: float = 60.0
     api_url: str = "https://descriptapi.com/v1/"
 
@@ -219,7 +235,6 @@ class DescriptConfig:
             self.language == "" or re.fullmatch(r"[a-z]{2}", self.language) is not None,
             'descript.language must be a two-letter code like "en" (or empty to auto-detect)',
         )
-        _check(self.max_upload_gb >= 0, "descript.max_upload_gb can't be negative (0 = no limit)")
         _check(self.wait_minutes >= 0, "descript.wait_minutes can't be negative")
         _check(
             self.api_url.startswith(("https://", "http://")),

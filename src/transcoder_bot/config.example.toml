@@ -12,7 +12,7 @@ recordings_dir = "/Volumes/HyperDeck"
 # mount_url = "smb://nas.local/HyperDeck"
 
 # Where the transcode is written before it's copied next to the source.
-# Needs roughly 12 GB free per hour of footage. Empty = the system temp folder.
+# Needs about 14 GB free per hour of footage at 25 Mbit/s. Empty = the system temp folder.
 # temp_dir = ""
 
 # ffmpeg/ffprobe to use. Found on PATH, in /opt/homebrew/bin or in /usr/local/bin by default.
@@ -33,14 +33,19 @@ rotate = "ccw"
 # 3840x2160 -> 1920x1080 -> rotated to 1080x1920.
 short_side = 1080
 # "libx264"           H.264 on the CPU: best quality per MB, most compatible (default).
-# "h264_videotoolbox" H.264 on the Apple media engine: much faster, somewhat bigger files.
+# "h264_videotoolbox" H.264 on the Apple media engine: much faster. At a high bitrate like
+#                     25M it looks nearly as good.
 # "libx265" / "hevc_videotoolbox" for HEVC (smaller, but less universally supported).
 encoder = "libx264"
-# libx264/libx265 quality: lower = better and bigger. 18-23 is the sensible range.
+# Average video bitrate. 25M (25 Mbit/s) makes a high-quality master for editing: about
+# 8.5 GB per 45 minutes. Set it to "" to use constant quality (crf/vt_quality) instead.
+bitrate = "25M"
+# Constant quality, when bitrate is "": lower = better and bigger. 18-23 is sensible,
+# and makes files a few GB per 45 minutes.
 crf = 20
 # libx264/libx265 speed vs. compression: faster presets make bigger files.
 preset = "medium"
-# VideoToolbox quality (1-100): higher = better and bigger.
+# VideoToolbox constant quality (1-100), when bitrate is "": higher = better and bigger.
 vt_quality = 65
 # "videotoolbox" decodes on the Apple media engine, leaving the CPU to the encoder.
 hwaccel = ""
@@ -111,10 +116,6 @@ folder = ""
 team_access = ""
 # Transcription language, e.g. "en". Empty = let Descript detect it.
 language = ""
-# The full-quality video is uploaded. Only if your Descript plan rejects big files, set this
-# (in GB): bigger videos then get a smaller copy made just for Descript, while the file on
-# the NAS stays full quality. 0 = no limit.
-max_upload_gb = 0
 # How long to wait for Descript to finish importing a video before reporting back.
 # 0 = don't wait.
 wait_minutes = 60

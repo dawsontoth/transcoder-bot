@@ -209,7 +209,7 @@ def test_describe(setup):
     text = transcoder.describe(source)
 
     assert "Service_1080p.mp4" in text
-    assert "3840x2160 prores, 45m 00s → 1080x1920 libx264" in text
+    assert "3840x2160 prores, 45m 00s → 1080x1920 libx264, 25 Mbit/s" in text
     assert "transpose=dir=cclock" in text
     assert "16 ch" in text
     assert "loudnorm to -16 LUFS" in text

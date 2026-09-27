@@ -9,12 +9,10 @@ from typing import Any
 
 import pytest
 
-from tests.fake_descript import GOOD_KEY, serve_fake_descript
 from tests.helpers import make_config
 from tests.test_poll import FakeSlack, pick
 from transcoder_bot import loudnorm
 from transcoder_bot.cli import main
-from transcoder_bot.descript import DescriptUploader
 from transcoder_bot.media import probe
 from transcoder_bot.poll import PollRunner
 from transcoder_bot.transcode import Transcoder
@@ -193,43 +191,3 @@ def test_poll_keeps_the_pick_and_trashes_the_rest(recording, tmp_path):
     assert trashed.destination.parent.parent == folder / "_Trash"
     assert trashed.destination.read_bytes() == recording.read_bytes()
     assert slack.last_status() == "✅ Saved *Service_1080p.mp4* next to the original."
-
-
-def test_videos_over_max_upload_gb_are_sent_as_a_smaller_copy(tmp_path, monkeypatch):
-    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
-    monkeypatch.setenv("no_proxy", "127.0.0.1")
-    video = tmp_path / "Busy_1080p.mp4"
-    subprocess.run(
-        [
-            *("ffmpeg", "-hide_banner", "-loglevel", "error", "-y"),
-            *("-f", "lavfi", "-i", "testsrc2=s=320x568:r=30:d=4,noise=alls=60:allf=t"),
-            *("-f", "lavfi", "-i", "sine=f=440:d=4:r=48000"),
-            *("-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p"),
-            *("-c:a", "aac", "-b:a", "64k", "-movflags", "+faststart", str(video)),
-        ],
-        check=True,
-    )
-    limit = video.stat().st_size // 3
-
-    with serve_fake_descript() as fake:
-        config = make_config(
-            tmp_path,
-            temp_dir=str(tmp_path),
-            video={"preset": "veryfast"},
-            descript={
-                "api_key": GOOD_KEY,
-                "api_url": fake.base_url,
-                "max_upload_gb": limit / 1e9,
-                "wait_minutes": 0,
-            },
-        )
-        upload = DescriptUploader(config, min_video_bitrate=0).upload(video, title="Busy")
-
-    assert upload.shrunk
-    sent = tmp_path / "sent.mp4"
-    sent.write_bytes(fake.uploads["Busy_1080p.mp4"])
-    assert sent.stat().st_size <= limit
-    streams = probe_streams(sent)
-    assert (streams["video"]["width"], streams["video"]["height"]) == (320, 568)
-    assert streams["video"]["codec_name"] == "h264"
-    assert streams["audio"]["codec_name"] == "aac"

@@ -1,4 +1,4 @@
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from tests.fake_descript import GOOD_KEY, JOB_ID, PROJECT_URL, FakeDescript, serve_fake_descript
-from tests.helpers import NOW, make_config, media
+from tests.helpers import NOW, make_config
 from transcoder_bot.descript import (
     DescriptClient,
     DescriptError,
@@ -14,8 +14,7 @@ from transcoder_bot.descript import (
     _retry_after,
     project_name,
 )
-from transcoder_bot.media import AudioStream, MediaInfo
-from transcoder_bot.runner import Progress, ProgressCallback
+from transcoder_bot.runner import Progress
 
 TODAY = NOW.astimezone().date().isoformat()
 
@@ -97,7 +96,6 @@ def test_uploads_into_a_new_project(fake, video, tmp_path):
     assert upload.project_name == f"{TODAY} Service"
     assert upload.uploaded_bytes == size
     assert upload.finished
-    assert not upload.shrunk
     assert progress[-1] == Progress("uploading to Descript", 1.0, None, progress[-1].eta_seconds)
 
 
@@ -193,100 +191,3 @@ def test_retry_after_can_be_a_date():
     assert _retry_after(later) is not None
     assert _retry_after("soon") is None
     assert _retry_after(None) is None
-
-
-class FakeShrink:
-    """Stands in for ffmpeg making the smaller copy: writes ``sizes`` bytes, one per attempt."""
-
-    def __init__(self, *sizes: int) -> None:
-        self.sizes = list(sizes)
-        self.commands: list[list[str]] = []
-
-    def __call__(
-        self,
-        cmd: Sequence[str],
-        *,
-        duration: float | None,
-        stage: str,
-        on_progress: ProgressCallback | None,
-    ) -> str:
-        self.commands.append(list(cmd))
-        Path(cmd[-1]).write_bytes(b"x" * self.sizes.pop(0))
-        return ""
-
-
-def aac_video(duration: float = 60.0) -> MediaInfo:
-    info = media(1080, 1920, duration=duration)
-    return MediaInfo(
-        duration=info.duration,
-        width=info.width,
-        height=info.height,
-        video_codec="h264",
-        audio_streams=(AudioStream("aac", 2, 48000, bit_rate=192_000),),
-    )
-
-
-def shrinking_uploader(fake, tmp_path, run: FakeShrink, **kwargs: Any) -> DescriptUploader:
-    config = make_config(
-        tmp_path, temp_dir=str(tmp_path), descript={"api_key": GOOD_KEY, "max_upload_gb": 1e-6}
-    )
-    clock = FakeClock()
-    client = DescriptClient(GOOD_KEY, base_url=fake.base_url, sleep=clock.sleep, clock=clock)
-    # A 1000-byte limit and a very short video keep the numbers small but realistic.
-    return DescriptUploader(
-        config, client, run=run, probe_fn=lambda path: aac_video(0.001), clock=clock, **kwargs
-    )
-
-
-def test_by_default_the_full_quality_video_is_uploaded(fake, video, tmp_path):
-    run = FakeShrink()  # fails if called: nothing should be re-encoded
-    clock = FakeClock()
-    config = make_config(tmp_path, descript={"api_key": GOOD_KEY})
-    client = DescriptClient(GOOD_KEY, base_url=fake.base_url, sleep=clock.sleep, clock=clock)
-
-    upload = DescriptUploader(config, client, run=run, clock=clock).upload(
-        video, title="Service", recorded=NOW
-    )
-
-    assert not upload.shrunk
-    assert run.commands == []
-    assert fake.uploads["Service_1080p.mp4"] == video.read_bytes()
-
-
-def test_videos_over_the_limit_get_a_smaller_copy(fake, video, tmp_path):
-    run = FakeShrink(900)
-
-    upload = shrinking_uploader(fake, tmp_path, run, min_video_bitrate=0).upload(
-        video, title="Service", recorded=NOW
-    )
-
-    assert upload.shrunk
-    assert upload.uploaded_bytes == 900
-    assert fake.uploads["Service_1080p.mp4"] == b"x" * 900
-    assert fake.imports[0]["add_media"]["Service_1080p.mp4"]["file_size"] == 900
-    (cmd,) = run.commands
-    assert cmd[cmd.index("-c:a") + 1] == "copy"  # AAC audio is kept as it is
-    assert "-b:v" in cmd
-    assert video.read_bytes().startswith(b"\x00\x00\x00\x18ftyp")  # the original is untouched
-
-
-def test_a_copy_that_is_still_too_big_is_redone_smaller(fake, video, tmp_path):
-    run = FakeShrink(1500, 900)
-
-    shrinking_uploader(fake, tmp_path, run, min_video_bitrate=0).upload(
-        video, title="Service", recorded=NOW
-    )
-
-    first, second = run.commands
-    bitrate = [int(c[c.index("-b:v") + 1].rstrip("k")) for c in (first, second)]
-    assert bitrate[1] < bitrate[0]
-
-
-def test_very_long_videos_are_not_squeezed_to_mush(fake, video, tmp_path):
-    run = FakeShrink()
-    uploader = shrinking_uploader(fake, tmp_path, run, min_video_bitrate=10**9)
-
-    with pytest.raises(DescriptError, match="too long"):
-        uploader.upload(video, title="Service", recorded=NOW)
-
-    assert fake.imports == []

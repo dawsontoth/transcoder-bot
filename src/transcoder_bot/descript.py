@@ -7,17 +7,14 @@ This does what Descript's own CLI (``@descript/platform-cli``) does with a local
 2. ``PUT`` the file to that URL.
 3. Poll ``GET /jobs/{job_id}`` until Descript has imported it.
 
-The full-quality video is uploaded. Only if ``descript.max_upload_gb`` is set, a bigger video
-gets a smaller copy made just for Descript. The file on the NAS is never touched.
+The video is uploaded exactly as it is on the NAS.
 """
 
 from __future__ import annotations
 
-import functools
 import json
 import logging
 import mimetypes
-import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -29,19 +26,14 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from transcoder_bot import __version__, commands
+from transcoder_bot import __version__
 from transcoder_bot.config import Config
 from transcoder_bot.formatting import human_size
-from transcoder_bot.media import MediaInfo, probe
-from transcoder_bot.runner import Progress, ProgressCallback, RunFfmpeg, run_ffmpeg
+from transcoder_bot.runner import Progress, ProgressCallback
 
 log = logging.getLogger(__name__)
 
 TERMINAL_JOB_STATES = ("stopped", "cancelled")
-# Below this, a long recording squeezed under the size limit would be too rough to edit.
-MIN_VIDEO_BITRATE = 1_000_000
-# Aim a little under the limit, since an encoder's average bitrate is never exact.
-SIZE_HEADROOM = 0.92
 
 
 class DescriptError(RuntimeError):
@@ -66,7 +58,6 @@ class DescriptUpload:
     project_id: str
     project_url: str
     uploaded_bytes: int
-    shrunk: bool  # a smaller copy was uploaded to fit the API's size limit
     finished: bool  # Descript finished importing it (False if we stopped waiting)
 
 
@@ -240,18 +231,12 @@ class DescriptUploader:
         config: Config,
         client: DescriptClient | None = None,
         *,
-        run: RunFfmpeg = run_ffmpeg,
-        probe_fn: Callable[[Path], MediaInfo] | None = None,
-        min_video_bitrate: int = MIN_VIDEO_BITRATE,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.config = config
         self.client = client or DescriptClient(
             config.descript.api_key, base_url=config.descript.api_url
         )
-        self._run = run
-        self._probe = probe_fn or functools.partial(probe, ffprobe=config.ffprobe)
-        self._min_video_bitrate = min_video_bitrate
         self._clock = clock
 
     def upload(
@@ -268,37 +253,30 @@ class DescriptUploader:
         if recorded is None:
             recorded = datetime.fromtimestamp(video.stat().st_mtime, tz=UTC)
         name = name or project_name(cfg.project_name, title=title, recorded=recorded)
-        limit = int(cfg.max_upload_gb * 1_000_000_000)  # 0 = no limit
         media_name = video.name
-        with tempfile.TemporaryDirectory(prefix="transcoder-bot-", dir=self.config.temp_dir) as tmp:
-            source, shrunk = video, False
-            if limit and video.stat().st_size > limit:
-                source, shrunk = self._shrink(video, Path(tmp), limit, on_progress), True
-            size = source.stat().st_size
-            spec: dict[str, Any] = {
-                "content_type": mimetypes.guess_type(media_name)[0] or "video/mp4",
-                "file_size": size,
-            }
-            if cfg.language:
-                spec["language"] = cfg.language
-            job = self.client.start_import(
-                project_name=name,
-                media={media_name: spec},
-                compositions=[{"name": title, "clips": [{"media": media_name}]}],
-                folder=cfg.folder,
-                team_access=cfg.team_access,
-            )
-            url = job.upload_urls.get(media_name)
-            if not url:
-                self.client.report_upload_status(
-                    job.job_id, media_name, "failed", "No upload URL returned"
-                )
-                raise DescriptError("Descript didn't return an upload URL")
-            log.info("Uploading %s (%s) to Descript as %r", media_name, human_size(size), name)
-            self._send(job, media_name, url, source, on_progress)
+        size = video.stat().st_size
+        spec: dict[str, Any] = {
+            "content_type": mimetypes.guess_type(media_name)[0] or "video/mp4",
+            "file_size": size,
+        }
+        if cfg.language:
+            spec["language"] = cfg.language
+        job = self.client.start_import(
+            project_name=name,
+            media={media_name: spec},
+            compositions=[{"name": title, "clips": [{"media": media_name}]}],
+            folder=cfg.folder,
+            team_access=cfg.team_access,
+        )
+        url = job.upload_urls.get(media_name)
+        if not url:
+            self.client.report_upload_status(job.job_id, media_name, "failed", "No upload URL")
+            raise DescriptError("Descript didn't return an upload URL")
+        log.info("Uploading %s (%s) to Descript as %r", media_name, human_size(size), name)
+        self._send(job, media_name, url, video, on_progress)
         finished = self._wait(job)
         log.info("In Descript: %s", job.project_url)
-        return DescriptUpload(name, job.project_id, job.project_url, size, shrunk, finished)
+        return DescriptUpload(name, job.project_id, job.project_url, size, finished)
 
     def _send(
         self,
@@ -339,47 +317,6 @@ class DescriptUploader:
             log.warning("Descript is still processing after %g minutes; it'll carry on", minutes)
             return False
         return True
-
-    def _shrink(
-        self, video: Path, folder: Path, limit: int, on_progress: ProgressCallback | None
-    ) -> Path:
-        """Make a copy of ``video`` that fits in ``limit`` bytes."""
-        info = self._probe(video)
-        audio = info.audio_streams[0] if info.audio_streams else None
-        # Keep AAC audio as it is (no quality loss); anything else becomes AAC 192k.
-        copy_audio = audio is not None and audio.codec == "aac"
-        audio_bits = (audio.bit_rate or 192_000) if audio is not None else 0
-        bitrate = int(limit * SIZE_HEADROOM * 8 / info.duration) - audio_bits
-        dest = folder / video.name
-        limit_text = f"{self.config.descript.max_upload_gb:g} GB"
-        for _attempt in range(3):
-            if bitrate < self._min_video_bitrate:
-                raise DescriptError(
-                    f"{video.name} is too long to fit under descript.max_upload_gb "
-                    f"({limit_text}) at a watchable quality. Raise the limit, or import it "
-                    "with the Descript app instead."
-                )
-            log.info(
-                "%s is %s, over descript.max_upload_gb (%s); making a copy at %.1f Mbit/s",
-                video.name,
-                human_size(video.stat().st_size),
-                limit_text,
-                bitrate / 1e6,
-            )
-            cmd = commands.shrink_command(
-                self.config, video, dest, video_bitrate=bitrate, copy_audio=copy_audio
-            )
-            self._run(
-                cmd,
-                duration=info.duration,
-                stage="making a copy for Descript",
-                on_progress=on_progress,
-            )
-            size = dest.stat().st_size
-            if size <= limit:
-                return dest
-            bitrate = int(bitrate * limit / size * SIZE_HEADROOM)
-        raise DescriptError(f"Couldn't make a copy of {video.name} small enough for Descript")
 
 
 class _CountingReader:

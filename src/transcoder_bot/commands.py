@@ -5,7 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from transcoder_bot import loudnorm
-from transcoder_bot.config import SOFTWARE_ENCODERS, AudioConfig, Config, ConfigError, VideoConfig
+from transcoder_bot.config import (
+    SOFTWARE_ENCODERS,
+    AudioConfig,
+    Config,
+    ConfigError,
+    VideoConfig,
+    bitrate_kbps,
+)
 from transcoder_bot.loudnorm import LoudnessStats
 from transcoder_bot.media import MediaInfo
 
@@ -83,10 +90,24 @@ def audio_filter(pan: str, audio: AudioConfig, loudness: LoudnessStats | None) -
 
 
 def video_encoder_args(video: VideoConfig) -> list[str]:
+    kbps = bitrate_kbps(video.bitrate) if video.bitrate else None
     if video.encoder in SOFTWARE_ENCODERS:
-        args = ["-c:v", video.encoder, "-preset", video.preset, "-crf", str(video.crf)]
+        args = ["-c:v", video.encoder, "-preset", video.preset]
+        if kbps:
+            # Aim for an average bitrate. The peak cap keeps busy scenes playable anywhere.
+            args += [
+                "-b:v",
+                f"{kbps}k",
+                "-maxrate",
+                f"{kbps * 3 // 2}k",
+                "-bufsize",
+                f"{kbps * 2}k",
+            ]
+        else:
+            args += ["-crf", str(video.crf)]
     else:
-        args = ["-c:v", video.encoder, "-q:v", str(video.vt_quality)]
+        args = ["-c:v", video.encoder]
+        args += ["-b:v", f"{kbps}k"] if kbps else ["-q:v", str(video.vt_quality)]
     if video.encoder in ("libx264", "h264_videotoolbox"):
         args += ["-profile:v", "high"]
     else:
@@ -137,44 +158,6 @@ def encode_command(
         cmd += audio_encoder_args(config.audio)
     cmd += ["-map_metadata", "0", "-movflags", "+faststart", str(dest)]
     return cmd
-
-
-def shrink_command(
-    config: Config, source: Path, dest: Path, *, video_bitrate: int, copy_audio: bool
-) -> list[str]:
-    """Re-encode ``source`` as H.264 at an average ``video_bitrate`` (bits/s), so the result fits
-    a size limit. The picture is already rotated and scaled; only the bitrate changes."""
-    kbps = max(1, video_bitrate // 1000)
-    if config.video.encoder.endswith("_videotoolbox"):
-        video = ["-c:v", "h264_videotoolbox", "-b:v", f"{kbps}k"]
-    else:
-        # A capped average bitrate keeps the size predictable while still letting
-        # busy scenes borrow bits from quiet ones.
-        video = ["-c:v", "libx264", "-preset", config.video.preset, "-b:v", f"{kbps}k"]
-        video += ["-maxrate", f"{kbps * 3 // 2}k", "-bufsize", f"{kbps * 3}k"]
-    audio = ["-c:a", "copy"] if copy_audio else ["-c:a", "aac", "-b:a", "192k"]
-    return [
-        config.ffmpeg,
-        *_BASE_ARGS,
-        "-y",
-        "-i",
-        str(source),
-        "-map",
-        "0:v:0",
-        "-map",
-        "0:a:0?",
-        *video,
-        "-profile:v",
-        "high",
-        "-pix_fmt",
-        "yuv420p",
-        *audio,
-        "-map_metadata",
-        "0",
-        "-movflags",
-        "+faststart",
-        str(dest),
-    ]
 
 
 def _even(value: float) -> int:

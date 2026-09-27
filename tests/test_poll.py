@@ -81,11 +81,8 @@ class FakeTranscoder:
 
 
 class FakeUploader:
-    def __init__(
-        self, *, error: Exception | None = None, shrunk: bool = False, finished: bool = True
-    ) -> None:
+    def __init__(self, *, error: Exception | None = None, finished: bool = True) -> None:
         self.error = error
-        self.shrunk = shrunk
         self.finished = finished
         self.calls: list[dict[str, Any]] = []
 
@@ -96,7 +93,7 @@ class FakeUploader:
         if self.error is not None:
             raise self.error
         url = "https://web.descript.com/proj-1"
-        return DescriptUpload("2026-09-27 take2", "proj-1", url, 2048, self.shrunk, self.finished)
+        return DescriptUpload("2026-09-27 take2", "proj-1", url, 2048, self.finished)
 
 
 def pick(name: str, user: str = "U1") -> Callable[[Poll], Decision]:
@@ -351,14 +348,13 @@ def test_the_pick_is_sent_to_descript(folder):
     )
 
 
-def test_descript_notes_a_smaller_copy_and_unfinished_processing(folder):
+def test_descript_notes_unfinished_processing(folder):
     slack = FakeSlack(pick("take2.mov"))
 
-    make_runner(folder, slack, uploader=FakeUploader(shrunk=True, finished=False)).run()
+    make_runner(folder, slack, uploader=FakeUploader(finished=False)).run()
 
     ready = next(t for t in slack.thread() if t.startswith("📝 Ready to edit"))
-    assert "smaller copy" in ready
-    assert "still processing" in ready
+    assert ready.endswith("Descript is still processing it.")
 
 
 def test_a_failed_descript_upload_is_reported_with_a_retry_command(folder):

@@ -10,7 +10,6 @@ from transcoder_bot.commands import (
     output_size,
     pan_filter,
     scaled_size,
-    shrink_command,
     video_encoder_args,
     video_filter,
 )
@@ -108,17 +107,47 @@ def test_audio_filter_without_normalization():
     assert audio_filter("pan=x", AudioConfig(), None) == "pan=x,aresample=48000"
 
 
+RATE = ["-b:v", "25000k", "-maxrate", "37500k", "-bufsize", "50000k"]
+
+
+@pytest.mark.parametrize(
+    ("encoder", "expected"),
+    [
+        ("libx264", ["-c:v", "libx264", "-preset", "medium", *RATE, "-profile:v", "high"]),
+        ("libx265", ["-c:v", "libx265", "-preset", "medium", *RATE, "-tag:v", "hvc1"]),
+        (
+            "h264_videotoolbox",
+            ["-c:v", "h264_videotoolbox", "-b:v", "25000k", "-profile:v", "high"],
+        ),
+        ("hevc_videotoolbox", ["-c:v", "hevc_videotoolbox", "-b:v", "25000k", "-tag:v", "hvc1"]),
+    ],
+)
+def test_video_encoder_args_aim_for_25_mbps(encoder, expected):
+    assert video_encoder_args(VideoConfig(encoder=encoder)) == expected
+
+
 @pytest.mark.parametrize(
     ("encoder", "expected"),
     [
         ("libx264", ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-profile:v", "high"]),
-        ("libx265", ["-c:v", "libx265", "-preset", "medium", "-crf", "20", "-tag:v", "hvc1"]),
         ("h264_videotoolbox", ["-c:v", "h264_videotoolbox", "-q:v", "65", "-profile:v", "high"]),
-        ("hevc_videotoolbox", ["-c:v", "hevc_videotoolbox", "-q:v", "65", "-tag:v", "hvc1"]),
     ],
 )
-def test_video_encoder_args(encoder, expected):
-    assert video_encoder_args(VideoConfig(encoder=encoder)) == expected
+def test_video_encoder_args_with_constant_quality(encoder, expected):
+    assert video_encoder_args(VideoConfig(encoder=encoder, bitrate="")) == expected
+
+
+def test_other_bitrates():
+    args = video_encoder_args(VideoConfig(bitrate="12.5M"))
+    assert args[args.index("-b:v") + 1 : args.index("-b:v") + 6] == [
+        "12500k",
+        "-maxrate",
+        "18750k",
+        "-bufsize",
+        "25000k",
+    ]
+    args = video_encoder_args(VideoConfig(bitrate="8000k"))
+    assert args[args.index("-b:v") + 1] == "8000k"
 
 
 def test_extra_args_are_appended():
@@ -173,32 +202,3 @@ def test_encode_command_without_audio(tmp_path):
     assert "-af" not in cmd
     assert "-c:a" not in cmd
     assert "-hwaccel" not in cmd
-
-
-def test_shrink_command_caps_the_bitrate(tmp_path):
-    cmd = shrink_command(
-        make_config(tmp_path),
-        Path("/NAS/take_1080p.mp4"),
-        Path("/tmp/take_1080p.mp4"),
-        video_bitrate=2_600_000,
-        copy_audio=True,
-    )
-
-    assert cmd[cmd.index("-c:v") + 1] == "libx264"
-    assert cmd[cmd.index("-b:v") + 1] == "2600k"
-    assert cmd[cmd.index("-maxrate") + 1] == "3900k"
-    assert cmd[cmd.index("-bufsize") + 1] == "7800k"
-    assert cmd[cmd.index("-c:a") + 1] == "copy"
-    assert cmd[-1] == "/tmp/take_1080p.mp4"
-
-
-def test_shrink_command_with_videotoolbox_and_new_audio(tmp_path):
-    config = make_config(tmp_path, video={"encoder": "hevc_videotoolbox"})
-
-    cmd = shrink_command(
-        config, Path("/in.mp4"), Path("/out.mp4"), video_bitrate=2_000_000, copy_audio=False
-    )
-
-    assert cmd[cmd.index("-c:v") + 1] == "h264_videotoolbox"  # H.264 for Descript either way
-    assert "-maxrate" not in cmd
-    assert cmd[cmd.index("-c:a") + 1 : cmd.index("-c:a") + 4] == ["aac", "-b:a", "192k"]

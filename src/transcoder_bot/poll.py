@@ -312,13 +312,10 @@ class PollRunner:
                 ts,
             )
             return None, str(exc)
-        notes = []
-        if upload.shrunk:
-            notes.append("It's a smaller copy, to stay under the upload size limit.")
-        if not upload.finished:
-            notes.append("Descript is still processing it.")
         text = f"📝 Ready to edit in Descript: <{upload.project_url}|{escape(upload.project_name)}>"
-        self._post_or_update(message_ts, " ".join([text, *notes]), ts)
+        if not upload.finished:
+            text += " Descript is still processing it."
+        self._post_or_update(message_ts, text, ts)
         return upload.project_url, None
 
     def _collect_options(self) -> tuple[list[PollOption], list[str], int]:

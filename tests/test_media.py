@@ -22,7 +22,6 @@ HYPERDECK_PROBE = {
             "codec_type": "audio",
             "sample_rate": "48000",
             "channels": 16,
-            "bit_rate": "18432000",
         },
         {"index": 2, "codec_type": "data", "codec_tag_string": "tmcd"},
     ],
@@ -43,7 +42,6 @@ def test_parses_a_hyperdeck_recording():
     assert len(info.audio_streams) == 1
     assert info.audio_streams[0].channels == 16
     assert info.audio_streams[0].sample_rate == 48000
-    assert info.audio_streams[0].bit_rate == 18_432_000
 
 
 def test_rotation_metadata_swaps_the_display_size():

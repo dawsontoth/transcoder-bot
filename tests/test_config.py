@@ -9,6 +9,7 @@ from transcoder_bot.config import (
     DEFAULT_CONFIG_PATH,
     ConfigError,
     SlackConfig,
+    bitrate_kbps,
     example_config_text,
     load_config,
     parse_config,
@@ -84,6 +85,9 @@ def test_rejects_unknown_keys_and_wrong_types(data, message):
         ("video", {"rotate": "left"}, "video.rotate"),
         ("video", {"short_side": 1081}, "video.short_side"),
         ("video", {"encoder": "libvpx"}, "video.encoder"),
+        ("video", {"bitrate": "25"}, "video.bitrate"),
+        ("video", {"bitrate": "25 Mbps"}, "video.bitrate"),
+        ("video", {"bitrate": "fast"}, "video.bitrate"),
         ("video", {"crf": 60}, "video.crf"),
         ("video", {"preset": "ludicrous"}, "video.preset"),
         ("audio", {"target_lufs": -3}, "audio.target_lufs"),
@@ -103,7 +107,6 @@ def test_rejects_unknown_keys_and_wrong_types(data, message):
         ("slack", {"app_token": "xoxb-1"}, "xapp-"),
         ("descript", {"team_access": "owner"}, "descript.team_access"),
         ("descript", {"language": "English"}, "descript.language"),
-        ("descript", {"max_upload_gb": -1}, "descript.max_upload_gb"),
         ("descript", {"wait_minutes": -1}, "descript.wait_minutes"),
         ("descript", {"project_name": "{title}"}, "placeholders"),
         ("descript", {"project_name": " "}, "descript.project_name can't be empty"),
@@ -203,9 +206,21 @@ def test_descript_is_off_until_it_has_a_key():
     config = parse_config({"recordings_dir": "/x"})
     assert not config.descript.enabled
     assert config.descript.project_name == "{date} {stem}"
-    assert config.descript.max_upload_gb == 0  # no limit: upload the full-quality file
 
     config = parse_config({"recordings_dir": "/x"}, env={"DESCRIPT_API_KEY": "dx_bearer_a:dx_b"})
     assert config.descript.enabled
     assert config.descript.api_key == "dx_bearer_a:dx_b"
     assert "dx_bearer_a" not in repr(config.descript)
+
+
+@pytest.mark.parametrize(
+    ("text", "kbps"), [("25M", 25_000), ("25m", 25_000), ("12.5M", 12_500), ("8000k", 8_000)]
+)
+def test_bitrate_kbps(text, kbps):
+    assert bitrate_kbps(text) == kbps
+
+
+def test_video_aims_for_25_mbps_by_default():
+    config = parse_config({"recordings_dir": "/x"})
+    assert config.video.bitrate == "25M"
+    assert parse_config({"recordings_dir": "/x", "video": {"bitrate": ""}}).video.bitrate == ""
