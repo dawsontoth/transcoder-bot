@@ -3,6 +3,8 @@ name = "transcoder-bot"
 version = "0.1.0"
 description = "Rotate, loudness-normalize and downscale Blackmagic HyperDeck recordings with ffmpeg, with an optional Slack poll to pick which take to keep."
 readme = "README.md"
+license = "ISC"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "slack-sdk>=3.33",

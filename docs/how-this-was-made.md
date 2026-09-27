@@ -1,6 +1,6 @@
 # How was this created? Learn from my prompts!
 
-Claude Code built this whole repo from the six prompts below. Each prompt is quoted word for word, followed by a short timeline of what Claude did with it.
+Claude Code built this whole repo from the seven prompts below. Each prompt is quoted word for word, followed by a short timeline of what Claude did with it.
 
 [← Back to the README](../README.md)
 
@@ -69,6 +69,13 @@ Claude Code built this whole repo from the six prompts below. Each prompt is quo
 - **Secrets:** scanned the files and the whole git history, with a pattern search and Yelp's detect-secrets. It found only test fakes and example placeholders.
 - **Settings:** confirmed that all settings and tokens live outside the repo.
 - **Docs:** rewrote them: a flowchart at the top of the README, a step-by-step setup guide with a check after each step, and this page.
+
+## 7. License and main
+
+> Let’s do ISC for the license, go ahead and merge to main.
+
+- Added the ISC license, in `LICENSE` and the package metadata.
+- Created `main` from the work branch.
 
 ## Takeaways
 

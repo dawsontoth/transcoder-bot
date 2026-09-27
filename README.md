@@ -117,3 +117,7 @@ src/transcoder_bot/
   macos.py            caffeinate and mounting the share
   doctor.py           setup checks
 ```
+
+## License
+
+[ISC](LICENSE)
