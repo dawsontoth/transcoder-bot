@@ -1,6 +1,8 @@
 # transcoder-bot configuration
 #
-# Lives at ~/.config/transcoder-bot/config.toml (create it with `transcoder-bot init-config`).
+# Your copy lives at ~/.config/transcoder-bot/config.toml: create it with
+# `transcoder-bot init-config` and edit that copy, not this example in the repo.
+# It holds your tokens, so it's readable only by you.
 # Only recordings_dir is required; every other value shown here is the default.
 # Check your edits with `transcoder-bot doctor`.
 
