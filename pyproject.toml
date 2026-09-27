@@ -1,0 +1,75 @@
+[project]
+name = "transcoder-bot"
+version = "0.1.0"
+description = "Rotate, loudness-normalize and downscale Blackmagic HyperDeck recordings with ffmpeg, with an optional Slack poll to pick which take to keep."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "slack-sdk>=3.33",
+]
+
+[project.scripts]
+transcoder-bot = "transcoder_bot.cli:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/transcoder_bot"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "SIM",  # flake8-simplify
+    "C4",   # flake8-comprehensions
+    "PTH",  # prefer pathlib
+    "DTZ",  # timezone-aware datetimes
+    "RET",  # return statements
+    "PT",   # pytest style
+    "N",    # pep8 naming
+    "BLE",  # blind except
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "RUF001",  # we intentionally use typographic characters (×, –) in user-facing strings
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["BLE"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "tests"]
+strict = true
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "integration: runs the real ffmpeg/ffprobe binaries (skipped when they are not installed)",
+]

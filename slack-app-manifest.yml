@@ -1,0 +1,27 @@
+# Slack app manifest for transcoder-bot.
+#
+# https://api.slack.com/apps -> Create New App -> From a manifest -> pick your workspace ->
+# paste this file. See "Set up the Slack poll" in the README for the remaining steps
+# (app-level token, install, invite the bot to your channel).
+_metadata:
+  major_version: 1
+  minor_version: 1
+display_information:
+  name: Transcoder Bot
+  description: Asks which HyperDeck recording to keep, then trashes the rest and transcodes it.
+  background_color: "#1d2b3a"
+features:
+  bot_user:
+    display_name: transcoder-bot
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - chat:write # post the poll and progress, and update them
+settings:
+  # Socket Mode: the Mac opens a WebSocket to Slack, so no public URL or open port is needed.
+  socket_mode_enabled: true
+  interactivity:
+    is_enabled: true # button clicks
+  org_deploy_enabled: false
+  token_rotation_enabled: false
