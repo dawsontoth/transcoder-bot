@@ -1,0 +1,10 @@
+%% The flowchart at the top of the README. After editing, run `make flowchart`.
+flowchart TD
+    rec("🎥 The HyperDeck records<br/>4K takes to a NAS") --> scan["⏰ Each day, the Mac finds<br/>takes from the last 48 hours"]
+    scan --> poll{{"💬 Slack poll:<br/>which take do we keep?"}}:::decision
+    poll -- "Skip, or no answer" --> keep("Nothing changes"):::muted
+    poll -- "Keep this one" --> trash["🗑️ The other takes<br/>move to _Trash"]
+    scan -. "Without Slack:<br/>every new take" .-> tx
+    trash --> tx["🎞️ Downscale to 1080p<br/>Rotate 90° CCW<br/>Normalize loudness<br/>H.264 at 25 Mbit/s"]
+    tx --> save("💾 Saved next to the original<br/>as Name_1080p.mp4"):::result
+    tx -.-> up("📝 Optional: uploaded to<br/>Descript, link in Slack"):::result

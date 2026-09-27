@@ -1,6 +1,6 @@
 # How was this created? Learn from my prompts!
 
-Claude Code built this whole repo from the seven prompts below. Each prompt is quoted word for word, followed by a short timeline of what Claude did with it.
+Claude Code built this whole repo from the eight prompts below. Each prompt is quoted word for word, followed by a short timeline of what Claude did with it.
 
 [← Back to the README](../README.md)
 
@@ -74,11 +74,19 @@ Claude Code built this whole repo from the seven prompts below. Each prompt is q
 
 > Let’s do ISC for the license, go ahead and merge to main.
 
-- Added the ISC license, in `LICENSE` and the package metadata.
+- Added the ISC license, in `LICENSE` and the package metadata. → `49fb438`
 - Created `main` from the work branch.
+
+## 8. The chart on GitHub
+
+> The flowchart isn’t rendering for me on GH
+
+- **Diagnosis:** the chart parsed in Mermaid 9 through 12, so the syntax was fine. The problems were elsewhere: GitHub's mobile app shows Mermaid charts as code, and on the website a chart that wide is scaled down to fit the page, which leaves its text tiny.
+- **Fix:** redrew the chart top to bottom, and committed it as light and dark SVGs rendered from a Mermaid source by `make flowchart`.
 
 ## Takeaways
 
 - **Ask for research and a recommendation, not just code.** The design choices then come with their reasons.
 - **Ask "where does it say that?"** It caught a real mistake here, so ask for sources on anything that matters.
 - **Steer with small, concrete prompts.** "Aim for like 25 Mbps" changed the design in one step.
+- **Check it where people will see it.** The chart passed a local Mermaid check, but not GitHub's app.

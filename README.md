@@ -2,17 +2,12 @@
 
 Turns Blackmagic HyperDeck recordings on a NAS into vertical 1080p video on a Mac. It can also ask your team in Slack which take to keep, and upload the result to Descript for editing.
 
-```mermaid
-flowchart LR
-    rec(["🎥 HyperDeck records<br/>4K takes to a NAS"]) --> scan["⏰ Daily, the Mac finds<br/>takes from the last 48 h"]
-    scan --> poll{"💬 Slack poll:<br/>which take<br/>do we keep?"}
-    poll -- "Skip, or<br/>no answer" --> keep(["Nothing changes"])
-    poll -- "Keep this one" --> trash["🗑️ The other takes<br/>move to _Trash"]
-    trash --> tx["🎞️ Downscale to 1080p<br/>Rotate 90° CCW<br/>Normalize loudness<br/>H.264 at 25 Mbit/s"]
-    scan -. "without Slack:<br/>every new take" .-> tx
-    tx --> save["💾 Saved next to<br/>the original as<br/>Name_1080p.mp4"]
-    save -. "optional" .-> up(["📝 Uploaded to Descript,<br/>link posted in Slack"])
-```
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/flowchart/flowchart-dark.svg">
+    <img alt="Flowchart. The HyperDeck records 4K takes to a NAS. Each day, the Mac finds takes from the last 48 hours and asks in a Slack poll which take to keep. Skip, or no answer: nothing changes. Keep this one: the other takes move to _Trash, and the pick is downscaled to 1080p, rotated 90° counter-clockwise, loudness-normalized and encoded as H.264 at 25 Mbit/s. Without Slack, every new take is transcoded. The result is saved next to the original as Name_1080p.mp4 and can also be uploaded to Descript, with the link posted in Slack." src="docs/flowchart/flowchart-light.svg">
+  </picture>
+</p>
 
 ## What it does
 
@@ -86,6 +81,7 @@ make install    # uv sync
 make check      # lint, type-check and test (what CI runs)
 make format     # auto-format and apply safe lint fixes
 make test-unit  # skip the ffmpeg integration tests
+make flowchart  # re-render the README flowchart (needs Node.js)
 ```
 
 - **Python and packaging:** Python 3.11+ (3.13 pinned in `.python-version`), managed with uv.
@@ -96,6 +92,7 @@ make test-unit  # skip the ffmpeg integration tests
   - Those tests are skipped when ffmpeg isn't installed.
   - Slack and Descript are tested against local fakes, so no tokens are needed.
 - **CI:** GitHub Actions runs the same checks on Ubuntu, with ffmpeg installed.
+- **The flowchart:** the README shows pre-rendered SVGs, because GitHub's mobile app shows Mermaid charts as code. Edit `docs/flowchart/flowchart.mmd`, then run `make flowchart`.
 
 ```
 src/transcoder_bot/

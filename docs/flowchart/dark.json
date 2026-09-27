@@ -1,0 +1,25 @@
+{
+  "theme": "base",
+  "look": "classic",
+  "htmlLabels": false,
+  "flowchart": {
+    "htmlLabels": false,
+    "useMaxWidth": false,
+    "wrappingWidth": 1000,
+    "nodeSpacing": 30,
+    "rankSpacing": 40,
+    "padding": 12
+  },
+  "themeVariables": {
+    "fontFamily": "Helvetica, Arial, sans-serif",
+    "fontSize": "16px",
+    "background": "#0d1117",
+    "primaryColor": "#161b22",
+    "primaryBorderColor": "#6e7681",
+    "primaryTextColor": "#e6edf3",
+    "textColor": "#e6edf3",
+    "lineColor": "#8d96a0",
+    "edgeLabelBackground": "#0d1117"
+  },
+  "themeCSS": ".edgeLabel rect { opacity: 1 !important; } .decision .label-container { fill: #0f2342 !important; stroke: #388bfd !important; } .result .label-container { fill: #0f2a19 !important; stroke: #2ea043 !important; } .muted .label-container { fill: #0d1117 !important; stroke-dasharray: 4 3; }"
+}
