@@ -1,6 +1,9 @@
 import subprocess
 from typing import Any
 
+import pytest
+
+from tests.fake_descript import GOOD_KEY, serve_fake_descript
 from tests.helpers import make_config
 from transcoder_bot.doctor import run_checks
 
@@ -50,6 +53,8 @@ def test_healthy_setup(tmp_path):
     assert checks["trash folder"].status == "ok"
     assert checks["Slack"].status == "warn"
     assert "slack.bot_token" in checks["Slack"].detail
+    assert checks["Descript"].status == "warn"
+    assert "descript.api_key" in checks["Descript"].detail
     assert str(checks["ffmpeg"]).startswith("✓ ffmpeg: ")
 
 
@@ -72,3 +77,14 @@ def test_missing_ffmpeg(tmp_path):
 
     assert checks["ffmpeg/ffprobe"].status == "fail"
     assert "brew install ffmpeg" in checks["ffmpeg/ffprobe"].detail
+
+
+@pytest.mark.parametrize(("key", "status"), [(GOOD_KEY, "ok"), ("dx_bearer_x:dx_secret_y", "fail")])
+def test_descript_key_is_checked(tmp_path, monkeypatch, key, status):
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    monkeypatch.setenv("no_proxy", "127.0.0.1")
+    with serve_fake_descript() as fake:
+        config = make_config(tmp_path, descript={"api_key": key, "api_url": fake.base_url})
+        checks = by_label(run_checks(config, run=fake_ffmpeg))
+
+    assert checks["Descript"].status == status

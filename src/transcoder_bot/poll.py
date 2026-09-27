@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Protocol
 
 from transcoder_bot.config import Config
+from transcoder_bot.descript import DescriptUpload
 from transcoder_bot.formatting import human_duration, human_size
 from transcoder_bot.media import MediaInfo, ProbeError
 from transcoder_bot.recordings import find_untranscoded
@@ -57,6 +58,18 @@ class TranscoderLike(Protocol):
     ) -> TranscodeResult: ...
 
 
+class UploaderLike(Protocol):
+    def upload(
+        self,
+        video: Path,
+        *,
+        title: str,
+        recorded: datetime | None = None,
+        name: str | None = None,
+        on_progress: ProgressCallback | None = None,
+    ) -> DescriptUpload: ...
+
+
 @dataclass(frozen=True)
 class PollOutcome:
     status: str  # "nothing-new", "expired", "skipped", "done" or "failed"
@@ -64,6 +77,8 @@ class PollOutcome:
     trashed: tuple[TrashedFile, ...] = ()
     result: TranscodeResult | None = None
     error: str | None = None
+    descript_url: str | None = None
+    descript_error: str | None = None
 
 
 def describe_transcode(config: Config) -> str:
@@ -91,11 +106,13 @@ class PollRunner:
         state: StateStore | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
         prepare: Callable[[], None] | None = None,
+        uploader: UploaderLike | None = None,
         dry_run: bool = False,
     ) -> None:
         self.config = config
         self.slack = slack
         self.transcoder = transcoder
+        self.uploader = uploader
         self._probe = probe_fn
         self._state = state
         self._now = now
@@ -211,7 +228,8 @@ class PollRunner:
 
         output_name = escape(self.transcoder.output_path(source).name)
         if self.dry_run:
-            self._post(f"{dry}Would transcode *{escape(chosen.key)}* → *{output_name}*.", ts)
+            then = " and send it to Descript" if self.uploader is not None else ""
+            self._post(f"{dry}Would transcode *{escape(chosen.key)}* → *{output_name}*{then}.", ts)
             status("Dry run finished: nothing was changed.")
             return PollOutcome("done", chosen=source, trashed=tuple(trashed))
 
@@ -245,8 +263,63 @@ class PollRunner:
                 done += f", now {after.output_i:.1f} LUFS"
             done += "."
         self._post_or_update(progress_ts, done, ts)
-        status(f"✅ Saved *{escape(result.output.name)}* next to the original.")
-        return PollOutcome("done", chosen=source, trashed=tuple(trashed), result=result)
+        saved = f"✅ Saved *{escape(result.output.name)}* next to the original."
+        if self.uploader is None:
+            status(saved)
+            return PollOutcome("done", chosen=source, trashed=tuple(trashed), result=result)
+
+        status(f"{saved} 📝 Sending it to Descript…")
+        url, error = self._send_to_descript(result.output, chosen, ts)
+        if url:
+            status(f"{saved} 📝 <{url}|Open in Descript>")
+        else:
+            status(f"{saved} ⚠️ Sending it to Descript failed; details in the thread.")
+        return PollOutcome(
+            "done",
+            chosen=source,
+            trashed=tuple(trashed),
+            result=result,
+            descript_url=url,
+            descript_error=error,
+        )
+
+    def _send_to_descript(
+        self, video: Path, chosen: PollOption, ts: str
+    ) -> tuple[str | None, str | None]:
+        """Upload the finished video; returns (project URL, error message)."""
+        assert self.uploader is not None
+        message_ts = self._post(f"📝 Sending *{escape(video.name)}* to Descript…", ts)
+        reporter = None
+        if message_ts and self.config.slack.progress_update_seconds:
+            progress_ts = message_ts
+            reporter = ThrottledProgress(
+                lambda p: self.slack.update(progress_ts, f"📝 {format_progress(p)}"),
+                self.config.slack.progress_update_seconds,
+            )
+        try:
+            upload = self.uploader.upload(
+                video,
+                title=chosen.recording.path.stem,
+                recorded=chosen.recording.modified,
+                on_progress=reporter,
+            )
+        except Exception as exc:
+            log.exception("Sending %s to Descript failed", video.name)
+            retry = f'transcoder-bot descript-upload "{video}"'
+            self._post_or_update(
+                message_ts,
+                f"⚠️ Couldn't send it to Descript: {escape(str(exc))}\nTo retry: `{retry}`",
+                ts,
+            )
+            return None, str(exc)
+        notes = []
+        if upload.shrunk:
+            notes.append("It's a smaller copy, to fit Descript's upload limit.")
+        if not upload.finished:
+            notes.append("Descript is still processing it.")
+        text = f"📝 Ready to edit in Descript: <{upload.project_url}|{escape(upload.project_name)}>"
+        self._post_or_update(message_ts, " ".join([text, *notes]), ts)
+        return upload.project_url, None
 
     def _collect_options(self) -> tuple[list[PollOption], list[str], int]:
         recordings = find_untranscoded(self.config, now=self._now())

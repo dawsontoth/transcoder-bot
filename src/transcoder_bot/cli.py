@@ -18,6 +18,7 @@ from slack_sdk.errors import SlackApiError
 
 from transcoder_bot import __version__
 from transcoder_bot.config import Config, ConfigError, load_config, resolve_config_path
+from transcoder_bot.descript import DescriptError, DescriptUploader
 from transcoder_bot.formatting import human_duration, human_size
 from transcoder_bot.loudnorm import LoudnormError
 from transcoder_bot.macos import ensure_mounted, keep_awake
@@ -109,6 +110,9 @@ def build_parser() -> argparse.ArgumentParser:
     transcode.add_argument(
         "--dry-run", action="store_true", help="show the plan without transcoding"
     )
+    transcode.add_argument(
+        "--no-descript", action="store_true", help="don't upload the results to Descript"
+    )
     transcode.set_defaults(handler=cmd_transcode)
 
     poll = commands.add_parser(
@@ -120,7 +124,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="post a real poll, but don't move, delete or transcode anything",
     )
     poll.add_argument("--timeout-hours", type=float, help="override slack.poll_timeout_hours")
+    poll.add_argument(
+        "--no-descript", action="store_true", help="don't upload the result to Descript"
+    )
     poll.set_defaults(handler=cmd_poll)
+
+    descript = commands.add_parser(
+        "descript-upload", help="upload videos to new Descript projects (e.g. to retry)"
+    )
+    descript.add_argument("files", nargs="+", type=Path, help="videos to upload")
+    descript.add_argument("--name", help="project name (default: from descript.project_name)")
+    descript.set_defaults(handler=cmd_descript_upload)
 
     purge = commands.add_parser(
         "purge-trash", help="delete trashed recordings older than trash.retention_days"
@@ -197,6 +211,7 @@ def cmd_transcode(args: argparse.Namespace) -> int:
     transcoder = Transcoder(config)
     state = StateStore(default_state_dir())
 
+    uploader = _uploader(config, args)
     if args.dry_run:
         failures = 0
         for source in _sources(args, config):
@@ -205,6 +220,9 @@ def cmd_transcode(args: argparse.Namespace) -> int:
             except TRANSCODE_ERRORS as exc:
                 log.error("%s: %s", source.name, exc)
                 failures += 1
+            else:
+                if uploader is not None:
+                    print("  then: upload it to a new Descript project")
         return EXIT_FAILED if failures else EXIT_OK
 
     failures = 0
@@ -215,11 +233,15 @@ def cmd_transcode(args: argparse.Namespace) -> int:
         reporter = ThrottledProgress(lambda p: log.info("%s", format_progress(p)), interval=30)
         for source in sources:
             try:
-                transcoder.transcode(source, force=args.force, on_progress=reporter)
+                result = transcoder.transcode(source, force=args.force, on_progress=reporter)
             except OutputExistsError as exc:
                 log.info("Skipping: %s", exc)
+                continue
             except TRANSCODE_ERRORS as exc:
                 log.error("Transcoding %s failed: %s", source.name, exc)
+                failures += 1
+                continue
+            if uploader is not None and not _upload(uploader, result.output, source, reporter):
                 failures += 1
     return EXIT_FAILED if failures else EXIT_OK
 
@@ -252,11 +274,28 @@ def cmd_poll(args: argparse.Namespace) -> int:
                 probe_fn=functools.partial(probe, ffprobe=config.ffprobe),
                 state=state,
                 prepare=functools.partial(ensure_mounted, config.recordings_dir, config.mount_url),
+                uploader=_uploader(config, args),
                 dry_run=args.dry_run,
             )
             outcome = runner.run(timeout_hours=args.timeout_hours)
     log.info("Poll finished: %s", outcome.status)
-    return EXIT_FAILED if outcome.status == "failed" else EXIT_OK
+    return EXIT_FAILED if outcome.status == "failed" or outcome.descript_error else EXIT_OK
+
+
+def cmd_descript_upload(args: argparse.Namespace) -> int:
+    config = _load(args)
+    uploader = _uploader(config, args)
+    if uploader is None:
+        raise ConfigError(
+            "Uploading to Descript needs an API key: set descript.api_key or DESCRIPT_API_KEY"
+        )
+    failures = 0
+    reporter = ThrottledProgress(lambda p: log.info("%s", format_progress(p)), interval=30)
+    with keep_awake():
+        for video in args.files:
+            if not _upload(uploader, video, _source_for(video, config), reporter, name=args.name):
+                failures += 1
+    return EXIT_FAILED if failures else EXIT_OK
 
 
 def cmd_purge_trash(args: argparse.Namespace) -> int:
@@ -317,6 +356,48 @@ def _load(args: argparse.Namespace) -> Config:
     return dataclasses.replace(
         config, ffmpeg=find_executable(config.ffmpeg), ffprobe=find_executable(config.ffprobe)
     )
+
+
+def _uploader(config: Config, args: argparse.Namespace) -> DescriptUploader | None:
+    if not config.descript.enabled or getattr(args, "no_descript", False):
+        return None
+    return DescriptUploader(config)
+
+
+def _upload(
+    uploader: DescriptUploader,
+    video: Path,
+    source: Path,
+    reporter: ThrottledProgress,
+    *,
+    name: str | None = None,
+) -> bool:
+    """Upload one video to Descript, logging the outcome. Returns False if it failed."""
+    try:
+        recorded = datetime.fromtimestamp(source.stat().st_mtime, tz=UTC)
+        upload = uploader.upload(
+            video, title=source.stem, recorded=recorded, name=name, on_progress=reporter
+        )
+    except (DescriptError, FfmpegError, ProbeError, OSError) as exc:
+        log.error("Sending %s to Descript failed: %s", video.name, exc)
+        log.error('To retry: transcoder-bot descript-upload "%s"', video)
+        return False
+    state = "ready to edit" if upload.finished else "uploaded, still processing"
+    log.info("Descript project %r (%s): %s", upload.project_name, state, upload.project_url)
+    return True
+
+
+def _source_for(video: Path, config: Config) -> Path:
+    """The recording a transcode was made from, if it's still next to it (for its name and
+    date); otherwise the video itself."""
+    suffix = config.output.suffix
+    if video.stem.endswith(suffix):
+        stem = video.stem[: -len(suffix)]
+        for ext in config.scan.extensions:
+            for candidate in (video.with_name(stem + ext), video.with_name(stem + ext.upper())):
+                if candidate.is_file():
+                    return candidate
+    return video
 
 
 def _sources(args: argparse.Namespace, config: Config) -> list[Path]:

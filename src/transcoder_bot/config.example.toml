@@ -96,3 +96,24 @@ allowed_user_ids = []
 notify_when_empty = false
 # How often to update the progress message while transcoding (seconds, 0 = off).
 progress_update_seconds = 60
+
+[descript]
+# Upload each finished video to a new Descript project, ready for editing.
+# Create a key in Descript: Settings -> API tokens -> Create token (it's tied to one Drive).
+# Leave it empty to read DESCRIPT_API_KEY instead. No key anywhere = nothing is uploaded.
+api_key = ""  # dx_bearer_...:dx_secret_...
+# Project name: {stem} = the recording's file name, {date} = the day it was recorded.
+project_name = "{date} {stem}"
+# Optional folder in the Drive to put the projects in.
+folder = ""
+# Who else in the Drive can open the projects: "edit", "comment", "none",
+# or "" for Descript's default.
+team_access = ""
+# Transcription language, e.g. "en". Empty = let Descript detect it.
+language = ""
+# Descript's API takes files up to 1 GB. Bigger videos get a smaller copy made just for
+# Descript (the file on the NAS stays full quality).
+max_upload_gb = 1.0
+# How long to wait for Descript to import and transcribe a video before reporting back.
+# 0 = don't wait.
+wait_minutes = 60

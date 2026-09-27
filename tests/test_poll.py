@@ -8,6 +8,7 @@ import pytest
 
 from tests.helpers import NOW, make_config, media, touch
 from transcoder_bot.config import Config
+from transcoder_bot.descript import DescriptError, DescriptUpload
 from transcoder_bot.loudnorm import LoudnessStats
 from transcoder_bot.media import MediaInfo, ProbeError
 from transcoder_bot.poll import PollRunner, describe_transcode
@@ -77,6 +78,25 @@ class FakeTranscoder:
         output.write_bytes(b"x" * 2048)
         stats = LoudnessStats(-27.6, -4.5, 8.0, -38.2, 0.5, output_i=-16.0)
         return TranscodeResult(source, output, 2700.0, 600.0, 2048, stats, stats)
+
+
+class FakeUploader:
+    def __init__(
+        self, *, error: Exception | None = None, shrunk: bool = False, finished: bool = True
+    ) -> None:
+        self.error = error
+        self.shrunk = shrunk
+        self.finished = finished
+        self.calls: list[dict[str, Any]] = []
+
+    def upload(self, video, *, title, recorded=None, name=None, on_progress=None) -> DescriptUpload:
+        self.calls.append({"video": video, "title": title, "recorded": recorded})
+        if on_progress is not None:
+            on_progress(Progress("uploading to Descript", 0.25))
+        if self.error is not None:
+            raise self.error
+        url = "https://web.descript.com/proj-1"
+        return DescriptUpload("2026-09-27 take2", "proj-1", url, 2048, self.shrunk, self.finished)
 
 
 def pick(name: str, user: str = "U1") -> Callable[[Poll], Decision]:
@@ -305,3 +325,60 @@ def test_describe_transcode(tmp_path):
     )
     config = make_config(tmp_path, video={"rotate": "none"}, audio={"normalize": False})
     assert describe_transcode(config) == "scaled to 1080p"
+
+
+def test_the_pick_is_sent_to_descript(folder):
+    slack = FakeSlack(pick("take2.mov"))
+    uploader = FakeUploader()
+
+    outcome = make_runner(folder, slack, uploader=uploader).run()
+
+    assert outcome.status == "done"
+    assert outcome.descript_url == "https://web.descript.com/proj-1"
+    (call,) = uploader.calls
+    assert call["video"] == folder / "take2_1080p.mp4"
+    assert call["title"] == "take2"
+    assert call["recorded"] == NOW - timedelta(hours=2)
+    thread = slack.thread()
+    assert any(t.startswith("📝 Uploading to Descript 25%") for t in thread)
+    assert any(
+        t == "📝 Ready to edit in Descript: <https://web.descript.com/proj-1|2026-09-27 take2>"
+        for t in thread
+    )
+    assert slack.last_status() == (
+        "✅ Saved *take2_1080p.mp4* next to the original. "
+        "📝 <https://web.descript.com/proj-1|Open in Descript>"
+    )
+
+
+def test_descript_notes_a_smaller_copy_and_unfinished_processing(folder):
+    slack = FakeSlack(pick("take2.mov"))
+
+    make_runner(folder, slack, uploader=FakeUploader(shrunk=True, finished=False)).run()
+
+    ready = next(t for t in slack.thread() if t.startswith("📝 Ready to edit"))
+    assert "smaller copy" in ready
+    assert "still processing" in ready
+
+
+def test_a_failed_descript_upload_is_reported_with_a_retry_command(folder):
+    slack = FakeSlack(pick("take2.mov"))
+    uploader = FakeUploader(error=DescriptError("Descript says the Drive is out of credits"))
+
+    outcome = make_runner(folder, slack, uploader=uploader).run()
+
+    assert outcome.status == "done"  # the transcode itself worked
+    assert outcome.descript_error == "Descript says the Drive is out of credits"
+    failure = next(t for t in slack.thread() if t.startswith("⚠️ Couldn't send it to Descript"))
+    assert f'transcoder-bot descript-upload "{folder / "take2_1080p.mp4"}"' in failure
+    assert "Sending it to Descript failed" in slack.last_status()
+
+
+def test_dry_run_mentions_descript(folder):
+    slack = FakeSlack(pick("take1.mov"))
+    uploader = FakeUploader()
+
+    make_runner(folder, slack, uploader=uploader, dry_run=True).run()
+
+    assert uploader.calls == []
+    assert any(t.endswith("and send it to Descript.") for t in slack.thread())

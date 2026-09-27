@@ -40,6 +40,7 @@ X264_PRESETS = (
 )
 OUTPUT_EXTENSIONS = (".mp4", ".mov", ".m4v")
 TRASH_MODES = ("folder", "delete")
+TEAM_ACCESS_LEVELS = ("", "edit", "comment", "none")
 
 
 class ConfigError(ValueError):
@@ -197,6 +198,47 @@ class SlackConfig:
 
 
 @dataclass(frozen=True)
+class DescriptConfig:
+    """Uploading finished videos to Descript for editing."""
+
+    api_key: str = field(default="", repr=False)
+    project_name: str = "{date} {stem}"
+    folder: str = ""
+    team_access: str = ""
+    language: str = ""
+    max_upload_gb: float = 1.0
+    wait_minutes: float = 60.0
+    api_url: str = "https://descriptapi.com/v1/"
+
+    def __post_init__(self) -> None:
+        _check(
+            self.team_access in TEAM_ACCESS_LEVELS,
+            f"descript.team_access must be one of {TEAM_ACCESS_LEVELS}",
+        )
+        _check(
+            self.language == "" or re.fullmatch(r"[a-z]{2}", self.language) is not None,
+            'descript.language must be a two-letter code like "en" (or empty to auto-detect)',
+        )
+        _check(0 < self.max_upload_gb <= 50, "descript.max_upload_gb must be between 0 and 50")
+        _check(self.wait_minutes >= 0, "descript.wait_minutes can't be negative")
+        _check(
+            self.api_url.startswith(("https://", "http://")),
+            "descript.api_url must be an http(s) URL",
+        )
+        try:
+            rendered = self.project_name.format(stem="x", date="2026-01-01")
+        except (KeyError, IndexError, ValueError) as exc:
+            raise ConfigError(
+                "descript.project_name can only use the placeholders {stem} and {date}"
+            ) from exc
+        _check(rendered.strip() != "", "descript.project_name can't be empty")
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.api_key)
+
+
+@dataclass(frozen=True)
 class Config:
     recordings_dir: Path
     mount_url: str = ""
@@ -209,9 +251,10 @@ class Config:
     output: OutputConfig = field(default_factory=OutputConfig)
     trash: TrashConfig = field(default_factory=TrashConfig)
     slack: SlackConfig = field(default_factory=SlackConfig)
+    descript: DescriptConfig = field(default_factory=DescriptConfig)
 
 
-_SECTIONS = ("scan", "video", "audio", "output", "trash", "slack")
+_SECTIONS = ("scan", "video", "audio", "output", "trash", "slack", "descript")
 _TOP_LEVEL = ("recordings_dir", "mount_url", "temp_dir", "ffmpeg", "ffprobe")
 
 T = TypeVar("T")
@@ -269,6 +312,10 @@ def parse_config(
             app_token=env.get("SLACK_APP_TOKEN") or slack.app_token,
         )
 
+    descript = _build_section(DescriptConfig, data.get("descript"), "descript")
+    if env.get("DESCRIPT_API_KEY"):
+        descript = dataclasses.replace(descript, api_key=env["DESCRIPT_API_KEY"])
+
     return Config(
         recordings_dir=_resolve_path(recordings_dir, base_dir),
         mount_url=_top_level_str(data, "mount_url"),
@@ -281,6 +328,7 @@ def parse_config(
         output=_build_section(OutputConfig, data.get("output"), "output"),
         trash=_build_section(TrashConfig, data.get("trash"), "trash"),
         slack=slack,
+        descript=descript,
     )
 
 
@@ -356,11 +404,14 @@ def _coerce(value: object, hint: Any, key: str) -> Any:
 
 
 def _warn_if_shared(path: Path, data: Mapping[str, Any]) -> None:
-    slack = data.get("slack")
-    has_tokens = isinstance(slack, dict) and any(slack.get(k) for k in ("bot_token", "app_token"))
-    if has_tokens and path.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+    secrets = {"slack": ("bot_token", "app_token"), "descript": ("api_key",)}
+    has_secrets = any(
+        isinstance(data.get(section), dict) and any(data[section].get(key) for key in keys)
+        for section, keys in secrets.items()
+    )
+    if has_secrets and path.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO):
         log.warning(
-            "%s holds Slack tokens but other users can read it. Fix with: chmod 600 %s",
+            "%s holds API tokens but other users can read it. Fix with: chmod 600 %s",
             path,
             path,
         )

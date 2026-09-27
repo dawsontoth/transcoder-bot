@@ -101,6 +101,13 @@ def test_rejects_unknown_keys_and_wrong_types(data, message):
         ("scan", {"lookback_hours": 0}, "scan.lookback_hours"),
         ("slack", {"bot_token": "xapp-1"}, "xoxb-"),
         ("slack", {"app_token": "xoxb-1"}, "xapp-"),
+        ("descript", {"team_access": "owner"}, "descript.team_access"),
+        ("descript", {"language": "English"}, "descript.language"),
+        ("descript", {"max_upload_gb": 0}, "descript.max_upload_gb"),
+        ("descript", {"wait_minutes": -1}, "descript.wait_minutes"),
+        ("descript", {"project_name": "{title}"}, "placeholders"),
+        ("descript", {"project_name": " "}, "descript.project_name can't be empty"),
+        ("descript", {"api_url": "descriptapi.com"}, "descript.api_url"),
     ],
 )
 def test_rejects_out_of_range_values(section, values, message):
@@ -190,3 +197,15 @@ def test_write_example_config_is_private(tmp_path):
     with pytest.raises(ConfigError, match="already exists"):
         write_example_config(dest)
     write_example_config(dest, force=True)
+
+
+def test_descript_is_off_until_it_has_a_key():
+    config = parse_config({"recordings_dir": "/x"})
+    assert not config.descript.enabled
+    assert config.descript.project_name == "{date} {stem}"
+    assert config.descript.max_upload_gb == 1.0
+
+    config = parse_config({"recordings_dir": "/x"}, env={"DESCRIPT_API_KEY": "dx_bearer_a:dx_b"})
+    assert config.descript.enabled
+    assert config.descript.api_key == "dx_bearer_a:dx_b"
+    assert "dx_bearer_a" not in repr(config.descript)

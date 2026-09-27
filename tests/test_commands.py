@@ -10,6 +10,7 @@ from transcoder_bot.commands import (
     output_size,
     pan_filter,
     scaled_size,
+    shrink_command,
     video_encoder_args,
     video_filter,
 )
@@ -172,3 +173,32 @@ def test_encode_command_without_audio(tmp_path):
     assert "-af" not in cmd
     assert "-c:a" not in cmd
     assert "-hwaccel" not in cmd
+
+
+def test_shrink_command_caps_the_bitrate(tmp_path):
+    cmd = shrink_command(
+        make_config(tmp_path),
+        Path("/NAS/take_1080p.mp4"),
+        Path("/tmp/take_1080p.mp4"),
+        video_bitrate=2_600_000,
+        copy_audio=True,
+    )
+
+    assert cmd[cmd.index("-c:v") + 1] == "libx264"
+    assert cmd[cmd.index("-b:v") + 1] == "2600k"
+    assert cmd[cmd.index("-maxrate") + 1] == "3900k"
+    assert cmd[cmd.index("-bufsize") + 1] == "7800k"
+    assert cmd[cmd.index("-c:a") + 1] == "copy"
+    assert cmd[-1] == "/tmp/take_1080p.mp4"
+
+
+def test_shrink_command_with_videotoolbox_and_new_audio(tmp_path):
+    config = make_config(tmp_path, video={"encoder": "hevc_videotoolbox"})
+
+    cmd = shrink_command(
+        config, Path("/in.mp4"), Path("/out.mp4"), video_bitrate=2_000_000, copy_audio=False
+    )
+
+    assert cmd[cmd.index("-c:v") + 1] == "h264_videotoolbox"  # H.264 for Descript either way
+    assert "-maxrate" not in cmd
+    assert cmd[cmd.index("-c:a") + 1 : cmd.index("-c:a") + 4] == ["aac", "-b:a", "192k"]

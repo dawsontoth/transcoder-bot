@@ -39,6 +39,7 @@ def run_checks(
     yield from _ffmpeg_checks(config, run)
     yield from _folder_checks(config)
     yield from _slack_checks(config, post_test=slack_test_message)
+    yield _descript_check(config)
 
 
 def _ffmpeg_checks(
@@ -174,3 +175,17 @@ def _slack_checks(config: Config, *, post_test: bool) -> Iterator[Check]:
             yield Check("ok", "Slack channel", f"posted a test message to {slack.channel}")
         except SlackApiError as exc:
             yield Check("fail", "Slack channel", describe_error(str(exc.response.get("error"))))
+
+
+def _descript_check(config: Config) -> Check:
+    if not config.descript.enabled:
+        return Check(
+            "warn", "Descript", "not configured (descript.api_key), so nothing will be uploaded"
+        )
+    from transcoder_bot.descript import DescriptClient, DescriptError
+
+    try:
+        DescriptClient(config.descript.api_key, base_url=config.descript.api_url).check()
+    except DescriptError as exc:
+        return Check("fail", "Descript", str(exc))
+    return Check("ok", "Descript", "API key works; finished videos will be uploaded")

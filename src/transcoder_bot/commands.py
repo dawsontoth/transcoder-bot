@@ -139,5 +139,43 @@ def encode_command(
     return cmd
 
 
+def shrink_command(
+    config: Config, source: Path, dest: Path, *, video_bitrate: int, copy_audio: bool
+) -> list[str]:
+    """Re-encode ``source`` as H.264 at an average ``video_bitrate`` (bits/s), so the result fits
+    a size limit. The picture is already rotated and scaled; only the bitrate changes."""
+    kbps = max(1, video_bitrate // 1000)
+    if config.video.encoder.endswith("_videotoolbox"):
+        video = ["-c:v", "h264_videotoolbox", "-b:v", f"{kbps}k"]
+    else:
+        # A capped average bitrate keeps the size predictable while still letting
+        # busy scenes borrow bits from quiet ones.
+        video = ["-c:v", "libx264", "-preset", config.video.preset, "-b:v", f"{kbps}k"]
+        video += ["-maxrate", f"{kbps * 3 // 2}k", "-bufsize", f"{kbps * 3}k"]
+    audio = ["-c:a", "copy"] if copy_audio else ["-c:a", "aac", "-b:a", "192k"]
+    return [
+        config.ffmpeg,
+        *_BASE_ARGS,
+        "-y",
+        "-i",
+        str(source),
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0?",
+        *video,
+        "-profile:v",
+        "high",
+        "-pix_fmt",
+        "yuv420p",
+        *audio,
+        "-map_metadata",
+        "0",
+        "-movflags",
+        "+faststart",
+        str(dest),
+    ]
+
+
 def _even(value: float) -> int:
     return max(2, 2 * round(value / 2))

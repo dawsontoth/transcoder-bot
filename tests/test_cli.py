@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.fake_descript import GOOD_KEY, serve_fake_descript
 from transcoder_bot.cli import main
 
 
@@ -13,6 +14,7 @@ def config_file(tmp_path, monkeypatch):
     monkeypatch.setenv("TRANSCODER_BOT_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
     monkeypatch.delenv("SLACK_APP_TOKEN", raising=False)
+    monkeypatch.delenv("DESCRIPT_API_KEY", raising=False)
     folder = tmp_path / "HyperDeck"
     folder.mkdir()
     path = tmp_path / "config.toml"
@@ -110,3 +112,35 @@ def test_version(capsys):
     with pytest.raises(SystemExit):
         main(["--version"])
     assert "transcoder-bot" in capsys.readouterr().out
+
+
+def test_descript_upload_needs_a_key(config_file, tmp_path, caplog):
+    video = tmp_path / "HyperDeck" / "Service_1080p.mp4"
+    video.write_bytes(b"video")
+
+    with caplog.at_level(logging.ERROR):
+        assert main(["--config", str(config_file), "descript-upload", str(video)]) == 2
+    assert "DESCRIPT_API_KEY" in caplog.text
+
+
+def test_descript_upload_names_the_project_after_the_recording(config_file, monkeypatch):
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    monkeypatch.setenv("no_proxy", "127.0.0.1")
+    folder = config_file.parent / "HyperDeck"
+    recording = aged(folder / "Service.mov", 3 * 86400)
+    video = folder / "Service_1080p.mp4"
+    video.write_bytes(b"video")
+    recorded = time.strftime("%Y-%m-%d", time.localtime(recording.stat().st_mtime))
+
+    with serve_fake_descript() as fake:
+        config_file.write_text(
+            config_file.read_text()
+            + f'[descript]\napi_key = "{GOOD_KEY}"\napi_url = "{fake.base_url}"\n'
+            + "wait_minutes = 0\n"
+        )
+        config_file.chmod(0o600)
+        assert main(["--config", str(config_file), "descript-upload", str(video)]) == 0
+
+    (request,) = fake.imports
+    assert request["project_name"] == f"{recorded} Service"
+    assert fake.uploads == {"Service_1080p.mp4": b"video"}

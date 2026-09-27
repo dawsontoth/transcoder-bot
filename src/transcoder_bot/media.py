@@ -20,6 +20,7 @@ class AudioStream:
     codec: str
     channels: int
     sample_rate: int
+    bit_rate: int | None = None
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,7 @@ def parse_probe(data: Mapping[str, Any], *, name: str = "file") -> MediaInfo:
             codec=str(s.get("codec_name", "unknown")),
             channels=int(s.get("channels") or 0),
             sample_rate=int(_number(s.get("sample_rate")) or 0),
+            bit_rate=int(_number(s.get("bit_rate")) or 0) or None,
         )
         for s in streams
         if s.get("codec_type") == "audio" and int(s.get("channels") or 0) > 0

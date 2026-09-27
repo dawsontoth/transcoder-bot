@@ -8,6 +8,7 @@ For each recording it:
 2. **Normalizes the audio** to −16 LUFS with two-pass EBU R128 loudness normalization.
 3. **Downscales** 4K (3840×2160) to 1080p, so the rotated result is 1080×1920.
 4. **Saves** it beside the original as `<name>_1080p.mp4` (H.264 + AAC).
+5. **Uploads** it to a new Descript project, ready for editing (optional).
 
 With Slack set up, the daily run looks like this:
 
@@ -17,10 +18,11 @@ flowchart LR
     B --> C["Slack poll:<br/>which one do we keep?"]
     C -- "someone picks" --> D["Move the others to<br/>_Trash on the NAS"]
     D --> E["Transcode the pick<br/>next to the original"]
+    E --> G["Upload it to Descript"]
     C -- "Skip, or no answer" --> F["Change nothing"]
 ```
 
-Without Slack, it transcodes every new recording instead.
+Without Slack, it transcodes every new recording instead. Uploading to Descript is optional either way.
 
 ## Recommendations and how it works
 
@@ -87,7 +89,7 @@ cd ~/transcoder-bot
 uv sync --managed-python
 ```
 
-`--managed-python` uses uv's own standalone Python instead of Homebrew's, which makes the macOS permission step (8) simpler. Run commands from this folder as `uv run transcoder-bot …`.
+`--managed-python` uses uv's own standalone Python instead of Homebrew's, which makes the macOS permission step (9) simpler. Run commands from this folder as `uv run transcoder-bot …`.
 
 ### 3. Connect the NAS
 
@@ -138,7 +140,15 @@ Because the config holds the tokens, `init-config` makes it readable only by you
 
 The app uses Socket Mode: the Mac opens a connection out to Slack, so it needs no public URL or open port.
 
-### 7. Schedule it
+### 7. Send videos to Descript (optional)
+
+1. In Descript, open **Settings → API tokens → Create token**. Name it, and pick the Drive the projects should go in.
+2. Put the token (`dx_bearer_…:dx_secret_…`) in the config's `[descript]` section as `api_key`. Or set the `DESCRIPT_API_KEY` environment variable instead.
+3. Run `uv run transcoder-bot doctor` to check the key works.
+
+From then on, each finished transcode is uploaded to a new Descript project, and the Slack thread gets a link to it. [Sending videos to Descript](#sending-videos-to-descript) has the details.
+
+### 8. Schedule it
 
 ```sh
 uv run transcoder-bot schedule install --at 18:00
@@ -158,7 +168,7 @@ launchctl kickstart gui/$(id -u)/local.transcoder-bot
 tail -f ~/Library/Logs/transcoder-bot.log
 ```
 
-### 8. Let macOS allow it
+### 9. Let macOS allow it
 
 A background job needs your permission to use a network volume:
 
@@ -212,20 +222,45 @@ The poll looks like this:
 
 **When clicks count.** Clicks only register while the job is running. If Slack says the app didn't respond, the poll had already timed out or the job was stopped. The next run marks any poll that a crash left open as interrupted.
 
+## Sending videos to Descript
+
+Descript's API is in early access. It comes with every paid Descript plan, and imports use the plan's transcription minutes like any other import.
+
+After each transcode, transcoder-bot:
+
+1. **Creates a Descript project.** It's named like `2026-09-26 Service_0930` (set by `project_name`: `{date}` is the recording date, `{stem}` its file name). The project has the 1080p video on its timeline.
+2. **Uploads the video** straight to Descript's storage. The Mac needs no public URL.
+3. **Waits for Descript to import and transcribe it**, for up to `wait_minutes` (60 by default).
+4. **Shares the link.** With Slack set up, the link goes in the poll's thread and "Open in Descript" is added to the poll message. Otherwise it's written to the log.
+
+**Files over 1 GB.** Descript's API only accepts files up to 1 GB, and 45 minutes of 1080p is often bigger. When it is, transcoder-bot makes a smaller H.264 copy just for Descript, at the highest bitrate that fits. That's about 2.6 Mbit/s for 45 minutes, which is fine for footage of people talking. The file on the NAS stays full quality. For full quality inside Descript, import the NAS file with the Descript app instead, which accepts much bigger files.
+
+**If an upload fails**, the transcode is kept. The error and a retry command go to the Slack thread and the log:
+
+```sh
+uv run transcoder-bot descript-upload "/Volumes/HyperDeck/Service_0930_1080p.mp4"
+```
+
+- `descript-upload` works with any video. Add `--name` to choose the project name.
+- Add `--no-descript` to `transcode` or `poll` to skip uploading for one run.
+
+Descript also has an official CLI for one-off imports: `npm i -g @descript/platform-cli` (needs Node 24+), then `descript-api import --name "My Project" --media ./video.mp4`. transcoder-bot calls the same API directly, so it doesn't need Node.
+
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `transcoder-bot init-config` | Writes a starter config to `~/.config/transcoder-bot/config.toml`. |
-| `transcoder-bot doctor [--post-test]` | Checks ffmpeg, the folders, free space and Slack. |
+| `transcoder-bot doctor [--post-test]` | Checks ffmpeg, the folders, free space, Slack and Descript. |
 | `transcoder-bot scan` | Lists recent recordings with their length and resolution. |
 | `transcoder-bot transcode FILE… [--force] [--dry-run]` | Transcodes the given files. |
 | `transcoder-bot transcode --new` | Transcodes every recent recording that isn't done yet. |
 | `transcoder-bot poll [--dry-run] [--timeout-hours H]` | The Slack poll, then trashing the others and transcoding the pick. |
+| `transcoder-bot descript-upload FILE… [--name NAME]` | Uploads videos to new Descript projects, e.g. to retry a failed upload. |
 | `transcoder-bot purge-trash [--dry-run]` | Deletes trash folders older than `retention_days`. `poll` does this too. |
 | `transcoder-bot schedule install\|uninstall\|print` | Manages the launchd agent. |
 
-Every command accepts `--config PATH`, and `-v` for debug logging.
+Every command accepts `--config PATH`, and `-v` for debug logging. `transcode` and `poll` also take `--no-descript`.
 
 ## Configuration
 
@@ -241,10 +276,12 @@ Every option is documented in [`config.example.toml`](src/transcoder_bot/config.
 | Use program audio on channels 3–4 | `[audio] channels = [3, 4]` |
 | Look further back | `[scan] lookback_hours = 72` |
 | Delete unpicked takes right away | `[trash] mode = "delete"` |
+| Put the Descript projects in a folder | `[descript] folder = "HyperDeck"` |
+| Let your team edit the Descript projects | `[descript] team_access = "edit"` |
 
 ## Troubleshooting
 
-- **`Operation not permitted`.** macOS privacy settings are blocking access to the NAS; see step 8.
+- **`Operation not permitted`.** macOS privacy settings are blocking access to the NAS; see step 9.
 - **`Recordings folder … not found. Is the NAS mounted?`** Mount the share in Finder, or set `mount_url`.
   - If Finder mounted it as `/Volumes/HyperDeck-1`, macOS left an empty `/Volumes/HyperDeck` folder behind. Eject the share and reconnect; restart if the folder is still there.
 - **`Mounting … timed out`.** macOS is waiting at a login dialog because no password is saved. Connect once in Finder with **Remember this password** ticked.
@@ -254,6 +291,9 @@ Every option is documented in [`config.example.toml`](src/transcoder_bot/config.
 - **Slack `not_in_channel`.** Type `/invite @transcoder-bot` in the channel.
 - **Slack `channel_not_found`.** `channel` must be the channel ID, not its name.
 - **Slack says "This app is not responding" when you click.** The job isn't running. The poll may have timed out, or the Mac slept or restarted. The next scheduled run posts a fresh poll.
+- **Descript "rejected the API key".** Create a new token under **Settings → API tokens** and update `descript.api_key`. Each token belongs to one Drive.
+- **Descript "out of media minutes or AI credits".** The Drive's plan allowance is used up for this billing period.
+- **"too long to squeeze under Descript's 1 GB API limit".** Recordings over about 1 hour 40 minutes would look too rough at that size. Import the `_1080p.mp4` with the Descript app instead.
 - **`encoder libx264 … not available`.** Homebrew has said it may drop x264 from its `ffmpeg` formula in 2027. Either:
   - set `encoder = "h264_videotoolbox"`, or
   - `brew install ffmpeg-full`, then point `ffmpeg` and `ffprobe` at `/opt/homebrew/opt/ffmpeg-full/bin/`.
@@ -296,7 +336,8 @@ src/transcoder_bot/
   trash.py            the trash folder and purging it
   slack_messages.py   Slack Block Kit messages and click parsing (pure functions)
   slack_bot.py        Slack Web API and Socket Mode
-  poll.py             the poll → trash → transcode flow
+  poll.py             the poll → trash → transcode → Descript flow
+  descript.py         uploading to Descript (API client, smaller copies)
   state.py            the run lock and open-poll bookkeeping
   schedule.py         the launchd agent
   macos.py            caffeinate and mounting the share

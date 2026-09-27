@@ -179,7 +179,7 @@ class ThrottledProgress:
 
 
 def format_progress(progress: Progress) -> str:
-    parts = [progress.stage.capitalize()]
+    parts = [progress.stage[:1].upper() + progress.stage[1:]]
     if progress.fraction is not None:
         parts[0] += f" {progress.fraction:.0%}"
     if progress.speed is not None:
