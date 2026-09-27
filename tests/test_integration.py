@@ -195,7 +195,7 @@ def test_poll_keeps_the_pick_and_trashes_the_rest(recording, tmp_path):
     assert slack.last_status() == "✅ Saved *Service_1080p.mp4* next to the original."
 
 
-def test_videos_over_descripts_limit_are_sent_as_a_smaller_copy(tmp_path, monkeypatch):
+def test_videos_over_max_upload_gb_are_sent_as_a_smaller_copy(tmp_path, monkeypatch):
     monkeypatch.setenv("NO_PROXY", "127.0.0.1")
     monkeypatch.setenv("no_proxy", "127.0.0.1")
     video = tmp_path / "Busy_1080p.mp4"

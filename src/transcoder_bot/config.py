@@ -206,7 +206,7 @@ class DescriptConfig:
     folder: str = ""
     team_access: str = ""
     language: str = ""
-    max_upload_gb: float = 1.0
+    max_upload_gb: float = 0.0
     wait_minutes: float = 60.0
     api_url: str = "https://descriptapi.com/v1/"
 
@@ -219,7 +219,7 @@ class DescriptConfig:
             self.language == "" or re.fullmatch(r"[a-z]{2}", self.language) is not None,
             'descript.language must be a two-letter code like "en" (or empty to auto-detect)',
         )
-        _check(0 < self.max_upload_gb <= 50, "descript.max_upload_gb must be between 0 and 50")
+        _check(self.max_upload_gb >= 0, "descript.max_upload_gb can't be negative (0 = no limit)")
         _check(self.wait_minutes >= 0, "descript.wait_minutes can't be negative")
         _check(
             self.api_url.startswith(("https://", "http://")),

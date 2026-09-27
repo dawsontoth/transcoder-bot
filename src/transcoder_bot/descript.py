@@ -3,12 +3,12 @@
 This does what Descript's own CLI (``@descript/platform-cli``) does with a local file:
 
 1. ``POST /jobs/import/project_media`` with the file's type and size. Descript creates the
-   project and returns a signed upload URL, valid for 3 hours.
+   project and returns a signed upload URL.
 2. ``PUT`` the file to that URL.
-3. Poll ``GET /jobs/{job_id}`` until Descript has imported (and transcribed) it.
+3. Poll ``GET /jobs/{job_id}`` until Descript has imported it.
 
-The API only accepts files up to 1 GB, so a bigger video first gets a smaller copy made just
-for Descript. The full-quality file on the NAS is never touched.
+The full-quality video is uploaded. Only if ``descript.max_upload_gb`` is set, a bigger video
+gets a smaller copy made just for Descript. The file on the NAS is never touched.
 """
 
 from __future__ import annotations
@@ -268,11 +268,11 @@ class DescriptUploader:
         if recorded is None:
             recorded = datetime.fromtimestamp(video.stat().st_mtime, tz=UTC)
         name = name or project_name(cfg.project_name, title=title, recorded=recorded)
-        limit = int(cfg.max_upload_gb * 1_000_000_000)
+        limit = int(cfg.max_upload_gb * 1_000_000_000)  # 0 = no limit
         media_name = video.name
         with tempfile.TemporaryDirectory(prefix="transcoder-bot-", dir=self.config.temp_dir) as tmp:
             source, shrunk = video, False
-            if video.stat().st_size > limit:
+            if limit and video.stat().st_size > limit:
                 source, shrunk = self._shrink(video, Path(tmp), limit, on_progress), True
             size = source.stat().st_size
             spec: dict[str, Any] = {
@@ -332,7 +332,7 @@ class DescriptUploader:
         minutes = self.config.descript.wait_minutes
         if minutes <= 0:
             return False
-        log.info("Waiting for Descript to import and transcribe it")
+        log.info("Waiting for Descript to finish importing it")
         try:
             self.client.wait_for_job(job.job_id, timeout=minutes * 60)
         except DescriptTimeoutError:
@@ -355,11 +355,12 @@ class DescriptUploader:
         for _attempt in range(3):
             if bitrate < self._min_video_bitrate:
                 raise DescriptError(
-                    f"{video.name} is too long to squeeze under Descript's {limit_text} API "
-                    "limit at a watchable quality. Import it with the Descript app instead."
+                    f"{video.name} is too long to fit under descript.max_upload_gb "
+                    f"({limit_text}) at a watchable quality. Raise the limit, or import it "
+                    "with the Descript app instead."
                 )
             log.info(
-                "%s is %s, over Descript's %s API limit; making a copy at %.1f Mbit/s",
+                "%s is %s, over descript.max_upload_gb (%s); making a copy at %.1f Mbit/s",
                 video.name,
                 human_size(video.stat().st_size),
                 limit_text,
@@ -418,7 +419,7 @@ def _raise_for_failure(job: Mapping[str, Any]) -> None:
 def _describe_http_error(exc: urllib.error.HTTPError) -> str:
     explanations = {
         401: "Descript rejected the API key (check descript.api_key)",
-        402: "Descript says the Drive is out of media minutes or AI credits",
+        402: "Descript returned HTTP 402 (payment required); the Drive may be out of credits",
         403: "Descript says this API key isn't allowed to do that",
         413: "Descript says the file is too big",
         429: "Descript is rate-limiting requests; try again later",

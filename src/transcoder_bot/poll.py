@@ -314,7 +314,7 @@ class PollRunner:
             return None, str(exc)
         notes = []
         if upload.shrunk:
-            notes.append("It's a smaller copy, to fit Descript's upload limit.")
+            notes.append("It's a smaller copy, to stay under the upload size limit.")
         if not upload.finished:
             notes.append("Descript is still processing it.")
         text = f"📝 Ready to edit in Descript: <{upload.project_url}|{escape(upload.project_name)}>"

@@ -111,9 +111,10 @@ folder = ""
 team_access = ""
 # Transcription language, e.g. "en". Empty = let Descript detect it.
 language = ""
-# Descript's API takes files up to 1 GB. Bigger videos get a smaller copy made just for
-# Descript (the file on the NAS stays full quality).
-max_upload_gb = 1.0
-# How long to wait for Descript to import and transcribe a video before reporting back.
+# The full-quality video is uploaded. Only if your Descript plan rejects big files, set this
+# (in GB): bigger videos then get a smaller copy made just for Descript, while the file on
+# the NAS stays full quality. 0 = no limit.
+max_upload_gb = 0
+# How long to wait for Descript to finish importing a video before reporting back.
 # 0 = don't wait.
 wait_minutes = 60

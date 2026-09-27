@@ -224,16 +224,16 @@ The poll looks like this:
 
 ## Sending videos to Descript
 
-Descript's API is in early access. It comes with every paid Descript plan, and imports use the plan's transcription minutes like any other import.
+Descript's API is in beta. [Descript's API docs](https://docs.descriptapi.com/) cover which plans include it and how usage counts.
 
 After each transcode, transcoder-bot:
 
 1. **Creates a Descript project.** It's named like `2026-09-26 Service_0930` (set by `project_name`: `{date}` is the recording date, `{stem}` its file name). The project has the 1080p video on its timeline.
-2. **Uploads the video** straight to Descript's storage. The Mac needs no public URL.
-3. **Waits for Descript to import and transcribe it**, for up to `wait_minutes` (60 by default).
+2. **Uploads the full-quality video** straight to Descript's storage. The Mac needs no public URL.
+3. **Waits for Descript to finish importing it**, for up to `wait_minutes` (60 by default).
 4. **Shares the link.** With Slack set up, the link goes in the poll's thread and "Open in Descript" is added to the poll message. Otherwise it's written to the log.
 
-**Files over 1 GB.** Descript's API only accepts files up to 1 GB, and 45 minutes of 1080p is often bigger. When it is, transcoder-bot makes a smaller H.264 copy just for Descript, at the highest bitrate that fits. That's about 2.6 Mbit/s for 45 minutes, which is fine for footage of people talking. The file on the NAS stays full quality. For full quality inside Descript, import the NAS file with the Descript app instead, which accepts much bigger files.
+**File size.** Descript's import docs don't list a size limit for API uploads. The 1080p files are typically a few GB, well under what Descript accepts in the browser. If your plan ever rejects big files, set `max_upload_gb`. Videos bigger than that then get a smaller H.264 copy made just for Descript, at the highest bitrate that fits; the file on the NAS stays full quality.
 
 **If an upload fails**, the transcode is kept. The error and a retry command go to the Slack thread and the log:
 
@@ -292,8 +292,8 @@ Every option is documented in [`config.example.toml`](src/transcoder_bot/config.
 - **Slack `channel_not_found`.** `channel` must be the channel ID, not its name.
 - **Slack says "This app is not responding" when you click.** The job isn't running. The poll may have timed out, or the Mac slept or restarted. The next scheduled run posts a fresh poll.
 - **Descript "rejected the API key".** Create a new token under **Settings → API tokens** and update `descript.api_key`. Each token belongs to one Drive.
-- **Descript "out of media minutes or AI credits".** The Drive's plan allowance is used up for this billing period.
-- **"too long to squeeze under Descript's 1 GB API limit".** Recordings over about 1 hour 40 minutes would look too rough at that size. Import the `_1080p.mp4` with the Descript app instead.
+- **Descript returns HTTP 402 ("payment required").** The Drive may have run out of credits for your plan; check its usage in Descript.
+- **"too long to fit under descript.max_upload_gb".** This only happens if you've set `max_upload_gb`: the recording would look too rough squeezed to that size. Raise the limit, or import the `_1080p.mp4` with the Descript app.
 - **`encoder libx264 … not available`.** Homebrew has said it may drop x264 from its `ffmpeg` formula in 2027. Either:
   - set `encoder = "h264_videotoolbox"`, or
   - `brew install ffmpeg-full`, then point `ffmpeg` and `ffprobe` at `/opt/homebrew/opt/ffmpeg-full/bin/`.

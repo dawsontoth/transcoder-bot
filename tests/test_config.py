@@ -103,7 +103,7 @@ def test_rejects_unknown_keys_and_wrong_types(data, message):
         ("slack", {"app_token": "xoxb-1"}, "xapp-"),
         ("descript", {"team_access": "owner"}, "descript.team_access"),
         ("descript", {"language": "English"}, "descript.language"),
-        ("descript", {"max_upload_gb": 0}, "descript.max_upload_gb"),
+        ("descript", {"max_upload_gb": -1}, "descript.max_upload_gb"),
         ("descript", {"wait_minutes": -1}, "descript.wait_minutes"),
         ("descript", {"project_name": "{title}"}, "placeholders"),
         ("descript", {"project_name": " "}, "descript.project_name can't be empty"),
@@ -203,7 +203,7 @@ def test_descript_is_off_until_it_has_a_key():
     config = parse_config({"recordings_dir": "/x"})
     assert not config.descript.enabled
     assert config.descript.project_name == "{date} {stem}"
-    assert config.descript.max_upload_gb == 1.0
+    assert config.descript.max_upload_gb == 0  # no limit: upload the full-quality file
 
     config = parse_config({"recordings_dir": "/x"}, env={"DESCRIPT_API_KEY": "dx_bearer_a:dx_b"})
     assert config.descript.enabled

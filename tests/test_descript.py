@@ -238,6 +238,21 @@ def shrinking_uploader(fake, tmp_path, run: FakeShrink, **kwargs: Any) -> Descri
     )
 
 
+def test_by_default_the_full_quality_video_is_uploaded(fake, video, tmp_path):
+    run = FakeShrink()  # fails if called: nothing should be re-encoded
+    clock = FakeClock()
+    config = make_config(tmp_path, descript={"api_key": GOOD_KEY})
+    client = DescriptClient(GOOD_KEY, base_url=fake.base_url, sleep=clock.sleep, clock=clock)
+
+    upload = DescriptUploader(config, client, run=run, clock=clock).upload(
+        video, title="Service", recorded=NOW
+    )
+
+    assert not upload.shrunk
+    assert run.commands == []
+    assert fake.uploads["Service_1080p.mp4"] == video.read_bytes()
+
+
 def test_videos_over_the_limit_get_a_smaller_copy(fake, video, tmp_path):
     run = FakeShrink(900)
 
